@@ -45,10 +45,24 @@ export default function LogWork() {
     try {
       let transitions = await getTransitions(key);
 
-      const resolvedKeywords = ["resolved", "done", "đã giải quyết", "hoàn thành", "ready for test"];
+      const inprogressKeywords = ["in progress", "đang thực hiện", "đang làm", "to do", "cần làm"];
+      const resolvedKeywords = ["resolved", "done", "đã giải quyết", "hoàn thành", "ready for test", "resolved / done"];
       const closedKeywords = ["closed", "đóng"];
 
-      // 1. Chuyển sang Resolved/Hoàn thành trước
+      // 1. Chuyển sang In Progress (nếu đang ở Open và có transition này)
+      const toInProgress = transitions.find(t => 
+        inprogressKeywords.includes(t.to.name.toLowerCase()) || 
+        inprogressKeywords.some(kw => t.name.toLowerCase().includes(kw))
+      );
+
+      if (toInProgress) {
+        await transitionIssue(key, toInProgress.id);
+        addToast("success", `🔄 Đã chuyển ${key} sang trạng thái: ${toInProgress.to.name}`);
+        // Lấy lại danh sách transition tiếp theo
+        transitions = await getTransitions(key);
+      }
+
+      // 2. Chuyển sang Resolved/Hoàn thành
       const toResolved = transitions.find(t => 
         resolvedKeywords.includes(t.to.name.toLowerCase()) || 
         resolvedKeywords.some(kw => t.name.toLowerCase().includes(kw))
@@ -61,7 +75,7 @@ export default function LogWork() {
         transitions = await getTransitions(key);
       }
 
-      // 2. Chuyển sang Closed/Đóng
+      // 3. Chuyển sang Closed/Đóng
       const toClosed = transitions.find(t => 
         closedKeywords.includes(t.to.name.toLowerCase()) || 
         closedKeywords.some(kw => t.name.toLowerCase().includes(kw))

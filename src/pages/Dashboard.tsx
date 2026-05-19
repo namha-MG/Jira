@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 import {
-  getMyIssues, JiraIssue, formatSeconds,
+  getMyIssues, JiraIssue, formatSeconds, getTransitions, transitionIssue,
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
@@ -47,8 +47,103 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [timeRange, setTimeRange] = useState<"month" | "all">("month");
+  
+  const [transitioning, setTransitioning] = useState(false);
+  const [transitionStatus, setTransitionStatus] = useState("");
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
+
+  const autoCloseLoggedTasks = async () => {
+    // Tìm các task có:
+    // 1. logged >= estimate (originalEstimateSeconds > 0)
+    // 2. remaining === 0
+    // 3. Status KHÔNG phải là Closed, Resolved, Cancelled, Done, v.v.
+    const targets = issues.filter((i) => {
+      const statusName = i.fields.status?.name?.toLowerCase() || "";
+      const est = i.fields.timetracking?.originalEstimateSeconds || 0;
+      const logged = i.fields.timetracking?.timeSpentSeconds || 0;
+      const remain = i.fields.timetracking?.remainingEstimateSeconds || 0;
+
+      // Tránh các task đã hoàn thành/hủy bỏ
+      const isCompleted =
+        statusName.includes("close") ||
+        statusName.includes("resolve") ||
+        statusName.includes("cancel") ||
+        statusName.includes("done") ||
+        statusName.includes("hủy") ||
+        statusName.includes("đóng") ||
+        statusName.includes("hoàn thành") ||
+        statusName.includes("đã giải quyết");
+
+      return est > 0 && logged >= est && remain === 0 && !isCompleted;
+    });
+
+    if (targets.length === 0) {
+      alert("🎉 Không tìm thấy task nào đã log đủ thời gian cần chuyển trạng thái!");
+      return;
+    }
+
+    if (
+      !confirm(
+        `Tìm thấy ${targets.length} task đã log đủ thời gian nhưng chưa đóng.\nBạn có muốn tự động chuyển trạng thái tuần tự cho tất cả các task này sang Closed không?`
+      )
+    ) {
+      return;
+    }
+
+    setTransitioning(true);
+    let successCount = 0;
+
+    for (const task of targets) {
+      const key = task.key;
+      setTransitionStatus(`Đang xử lý ${key}: ${task.fields.summary.slice(0, 30)}...`);
+      try {
+        let transitions = await getTransitions(key);
+
+        const inprogressKeywords = ["in progress", "đang thực hiện", "đang làm", "to do", "cần làm"];
+        const resolvedKeywords = ["resolved", "done", "đã giải quyết", "hoàn thành", "ready for test", "resolved / done"];
+        const closedKeywords = ["closed", "đóng"];
+
+        // 1. Chuyển sang In Progress (nếu có)
+        const toInProgress = transitions.find(t => 
+          inprogressKeywords.includes(t.to.name.toLowerCase()) || 
+          inprogressKeywords.some(kw => t.name.toLowerCase().includes(kw))
+        );
+        if (toInProgress) {
+          await transitionIssue(key, toInProgress.id);
+          transitions = await getTransitions(key);
+        }
+
+        // 2. Chuyển sang Resolved/Hoàn thành
+        const toResolved = transitions.find(t => 
+          resolvedKeywords.includes(t.to.name.toLowerCase()) || 
+          resolvedKeywords.some(kw => t.name.toLowerCase().includes(kw))
+        );
+        if (toResolved) {
+          await transitionIssue(key, toResolved.id);
+          transitions = await getTransitions(key);
+        }
+
+        // 3. Chuyển sang Closed/Đóng
+        const toClosed = transitions.find(t => 
+          closedKeywords.includes(t.to.name.toLowerCase()) || 
+          closedKeywords.some(kw => t.name.toLowerCase().includes(kw))
+        );
+        if (toClosed) {
+          await transitionIssue(key, toClosed.id);
+        }
+
+        successCount++;
+      } catch (err) {
+        console.error(`Lỗi chuyển đổi trạng thái ${key}:`, err);
+      }
+    }
+
+    setTransitioning(false);
+    setTransitionStatus("");
+    alert(`✅ Hoàn thành! Đã chuyển trạng thái thành công cho ${successCount}/${targets.length} task.`);
+    fetchData(); // Refresh dashboard
+  };
 
   const fetchData = useCallback(async () => {
     if (!isConfigured) {
@@ -77,6 +172,17 @@ export default function Dashboard() {
 
   // Lọc Issues theo phạm vi thời gian
   const filteredIssues = issues.filter((i) => {
+    // LOẠI BỎ CÁC TASK ĐÃ BỊ HỦY/CANCEL KHỎI DASHBOARD!
+    const statusName = i.fields.status?.name?.toLowerCase() || "";
+    if (
+      statusName.includes("cancel") ||
+      statusName.includes("hủy") ||
+      statusName.includes("không thực hiện") ||
+      statusName.includes("reject")
+    ) {
+      return false;
+    }
+
     if (timeRange === "all") return true;
     
     // Giữ lại issue nếu nó được cập nhật trong tháng này
@@ -211,12 +317,29 @@ export default function Dashboard() {
           </button>
         </div>
 
-        <div className="page-actions" style={{ marginLeft: 0 }}>
+        <div className="page-actions" style={{ marginLeft: 0, display: "flex", gap: 8 }}>
+          <button
+            className="btn btn-sm"
+            onClick={autoCloseLoggedTasks}
+            disabled={loading || transitioning}
+            style={{ 
+              background: "linear-gradient(135deg, #8b5cf6, #4f8ef7)", 
+              color: "white", 
+              border: "none",
+              fontWeight: 500,
+              padding: "6px 14px",
+              borderRadius: 8,
+              cursor: "pointer",
+              boxShadow: "0 4px 12px rgba(139, 92, 246, 0.25)"
+            }}
+          >
+            ⚡ Auto Close Task Đủ Giờ
+          </button>
           <button
             id="btn-refresh-dashboard"
             className="btn btn-secondary btn-sm"
             onClick={fetchData}
-            disabled={loading}
+            disabled={loading || transitioning}
           >
             <span className={loading ? "spinning" : ""}>🔄</span>
             {loading ? "Đang tải..." : "Refresh"}
@@ -225,6 +348,26 @@ export default function Dashboard() {
       </div>
 
       <div className="page-body">
+        {transitioning && (
+          <div className="toast" style={{ 
+            marginBottom: 16, 
+            background: "rgba(139, 92, 246, 0.1)", 
+            border: "1px solid rgba(139, 92, 246, 0.2)",
+            color: "var(--text-primary)",
+            padding: "16px 20px",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            borderRadius: 16
+          }}>
+            <div className="spinning" style={{ fontSize: 20 }}>⚙️</div>
+            <div style={{ flex: 1 }}>
+              <strong style={{ display: "block", fontSize: 14 }}>Đang tự động chuyển trạng thái tuần tự...</strong>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{transitionStatus}</span>
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="toast" style={{ marginBottom: 16, borderLeft: "3px solid var(--accent-red)" }}>
             <span>❌</span> {error}
