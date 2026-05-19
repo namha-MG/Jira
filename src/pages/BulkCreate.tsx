@@ -72,14 +72,16 @@ export default function BulkCreate() {
         day: "numeric",
       });
 
-      // Cập nhật trạng thái sang 'processing' kèm ngày log
+      // Cập nhật trạng thái sang 'processing' kèm ngày log/gán
       setLogs((prev) =>
         prev.map((log, idx) =>
           idx === i 
             ? { 
                 ...log, 
                 status: "processing", 
-                logDateText: autoLogWork ? `Lên lịch log: ${logDateFormatted}` : undefined 
+                logDateText: autoLogWork 
+                  ? `Lên lịch log: ${logDateFormatted}` 
+                  : `Lên lịch gán ngày: ${logDateFormatted}` 
               } 
             : log
         )
@@ -242,22 +244,24 @@ export default function BulkCreate() {
                 </label>
               </div>
 
-              {autoLogWork && (
-                <div className="form-group">
-                  <label htmlFor="input-start-date-log">Ngày bắt đầu log work *</label>
-                  <input
-                    id="input-start-date-log"
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    disabled={isRunning}
-                    required
-                  />
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                    Mỗi dòng tóm tắt sẽ tự động được log 7h trên 1 ngày kế tiếp (<strong>bỏ qua các ngày Thứ Bảy và Chủ Nhật</strong>).
-                  </div>
+              <div className="form-group">
+                <label htmlFor="input-start-date-log">
+                  {autoLogWork ? "Ngày bắt đầu log work *" : "Ngày bắt đầu của Task *"}
+                </label>
+                <input
+                  id="input-start-date-log"
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  disabled={isRunning}
+                  required
+                />
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                  {autoLogWork 
+                    ? "Mỗi dòng tóm tắt sẽ tự động được gán Start/End Date và log 7h trên 1 ngày kế tiếp (bỏ qua Thứ Bảy và Chủ Nhật)."
+                    : "Mỗi dòng tóm tắt sẽ tự động được gán Start/End Date trên 1 ngày kế tiếp (bỏ qua Thứ Bảy và Chủ Nhật) nhưng KHÔNG thực hiện log work."}
                 </div>
-              )}
+              </div>
 
               <div className="form-group">
                 <label>Thời gian Estimate mặc định</label>
