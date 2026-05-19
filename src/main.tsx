@@ -1,4 +1,27 @@
 console.log("=== MAIN.TSX EXECUTING ===");
+
+// Polyfill Web Crypto API for non-secure contexts (HTTP) to prevent MSAL from crashing on initialization
+if (typeof window !== "undefined") {
+  if (!window.crypto) {
+    (window as any).crypto = {};
+  }
+  if (!window.crypto.subtle) {
+    (window as any).crypto.subtle = {
+      digest: async () => new Uint8Array(32),
+      importKey: async () => ({}),
+      sign: async () => new Uint8Array(32),
+    };
+  }
+  if (!window.crypto.getRandomValues) {
+    (window as any).crypto.getRandomValues = (arr: any) => {
+      for (let i = 0; i < arr.length; i++) {
+        arr[i] = Math.floor(Math.random() * 256);
+      }
+      return arr;
+    };
+  }
+}
+
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { PublicClientApplication, EventType } from "@azure/msal-browser";
