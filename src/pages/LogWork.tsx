@@ -40,6 +40,75 @@ export default function LogWork() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
   };
 
+  const [generatingAi, setGeneratingAi] = useState(false);
+
+  const handleGenerateAiComment = async () => {
+    const keysToLog = issueKeysText
+      .split(/[\n, ]+/)
+      .map(k => k.trim().toUpperCase())
+      .filter(k => k.length > 0);
+
+    if (keysToLog.length === 0) {
+      addToast("error", "⚠️ Vui lòng điền ít nhất 1 Issue Key trước khi sinh ghi chú.");
+      return;
+    }
+
+    const geminiKey = localStorage.getItem("gemini_api_key");
+    if (!geminiKey) {
+      addToast("error", "⚠️ Vui lòng vào trang Cài đặt để cấu hình Google Gemini API Key trước.");
+      return;
+    }
+
+    setGeneratingAi(true);
+    try {
+      const key = keysToLog[0];
+      let issueObj = myIssues.find((i) => i.key === key);
+      if (!issueObj) {
+        try {
+          issueObj = await getIssue(key);
+        } catch {
+          // ignore
+        }
+      }
+
+      const summary = issueObj?.fields?.summary || "";
+      if (!summary) {
+        throw new Error(`Không tìm thấy tiêu đề của task ${key} trên Jira.`);
+      }
+
+      const prompt = `Bạn là một kỹ sư phần mềm chuyên nghiệp. Hãy viết 1 câu ngắn gọn (dưới 15 từ) ghi chú lại công việc đã thực hiện cho task Jira có tiêu đề: "${summary}". Ví dụ: "Đã hoàn thành tối ưu hóa truy vấn SQL và sửa lỗi bộ lọc". Viết bằng tiếng Việt, trực tiếp, bắt đầu bằng từ hành động như "Hoàn thành...", "Cải tiến...", "Tối ưu...", "Sửa lỗi...", không dài dòng, không có phần giới thiệu, không thêm bất kỳ định dạng markdown hay dấu ngoặc kép nào xung quanh.`;
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: prompt }]
+          }]
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Lỗi gọi API Gemini. Vui lòng kiểm tra lại API Key.");
+      }
+
+      const data = await response.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+      if (text) {
+        setComment(text);
+        addToast("success", "✨ Đã sinh ghi chú công việc bằng AI thành công!");
+      } else {
+        throw new Error("Không nhận được phản hồi hợp lệ từ AI.");
+      }
+    } catch (e: any) {
+      addToast("error", `❌ Lỗi sinh ghi chú AI: ${e.message || "Lỗi không xác định"}`);
+    } finally {
+      setGeneratingAi(false);
+    }
+  };
+
   const handleAutoTransition = async (key: string) => {
     addToast("success", `⏱️ Đang tự động cập nhật trạng thái cho ${key} vì đã log đủ thời gian estimate...`);
     try {
@@ -148,10 +217,33 @@ export default function LogWork() {
 
         let finalComment = comment.trim();
         if (!finalComment) {
-          if (issueObj && issueObj.fields && issueObj.fields.summary) {
-            finalComment = `Thực hiện công việc: ${issueObj.fields.summary}`;
-          } else {
-            finalComment = `Thực hiện công việc cho task ${key}`;
+          // Thử sinh bằng AI tự động nếu có API key
+          const geminiKey = localStorage.getItem("gemini_api_key");
+          if (geminiKey && issueObj && issueObj.fields && issueObj.fields.summary) {
+            try {
+              const summary = issueObj.fields.summary;
+              const prompt = `Bạn là một kỹ sư phần mềm chuyên nghiệp. Hãy viết 1 câu ngắn gọn (dưới 15 từ) ghi chú lại công việc đã thực hiện cho task Jira có tiêu đề: "${summary}". Ví dụ: "Đã hoàn thành tối ưu hóa truy vấn SQL và sửa lỗi bộ lọc". Viết bằng tiếng Việt, trực tiếp, bắt đầu bằng từ hành động như "Hoàn thành...", "Cải tiến...", "Tối ưu...", "Sửa lỗi...", không dài dòng, không có phần giới thiệu, không thêm bất kỳ định dạng markdown hay dấu ngoặc kép nào xung quanh.`;
+              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+              });
+              if (response.ok) {
+                const data = await response.json();
+                finalComment = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+              }
+            } catch (e) {
+              console.warn("Auto AI generation failed, falling back to static template", e);
+            }
+          }
+
+          // Fallback nếu AI lỗi hoặc không có API key
+          if (!finalComment) {
+            if (issueObj && issueObj.fields && issueObj.fields.summary) {
+              finalComment = `Thực hiện công việc: ${issueObj.fields.summary}`;
+            } else {
+              finalComment = `Thực hiện công việc cho task ${key}`;
+            }
           }
         }
 
@@ -330,10 +422,39 @@ export default function LogWork() {
 
 
                 <div className="form-group">
-                  <label htmlFor="input-comment">Ghi chú công việc</label>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <label htmlFor="input-comment" style={{ margin: 0 }}>Ghi chú công việc</label>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={handleGenerateAiComment}
+                      disabled={generatingAi}
+                      style={{ 
+                        padding: "4px 8px", 
+                        fontSize: 12, 
+                        display: "flex", 
+                        alignItems: "center", 
+                        gap: 6, 
+                        background: "rgba(16, 185, 129, 0.08)", 
+                        border: "1px solid rgba(16, 185, 129, 0.2)",
+                        color: "var(--accent-green)",
+                        borderRadius: 6
+                      }}
+                    >
+                      {generatingAi ? (
+                        <>
+                          <span className="spinning">⏳</span> Đang sinh bằng AI...
+                        </>
+                      ) : (
+                        <>
+                          <span>✨</span> Sinh ghi chú bằng AI
+                        </>
+                      )}
+                    </button>
+                  </div>
                   <textarea
                     id="input-comment"
-                    placeholder="Mô tả công việc đã làm..."
+                    placeholder="Mô tả công việc đã làm... (Ví dụ: Đã phát triển API, sửa lỗi hiển thị, tối ưu database...)"
                     value={comment}
                     onChange={(e) => setComment(e.target.value)}
                     rows={4}

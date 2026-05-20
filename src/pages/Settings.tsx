@@ -6,12 +6,14 @@ interface Toast { id: number; type: "success" | "error" | "info"; msg: string; }
 
 export default function Settings() {
   const [pat, setPat] = useState(() => localStorage.getItem("jira_pat") || "");
+  const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
   const [jiraUrl, setJiraUrl] = useState(() => localStorage.getItem("jira_url") || JIRA_BASE_URL);
   const [testing, setTesting] = useState(false);
   const [connStatus, setConnStatus] = useState<null | { ok: boolean; user?: JiraUser; msg?: string }>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [saving, setSaving] = useState(false);
   const [showPat, setShowPat] = useState(false);
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
 
   // Trích xuất Tenant ID từ authority URL (e.g. login.microsoftonline.com/TENANT_ID)
   const tenantId = msalConfig.auth.authority.split("/").pop() || "";
@@ -53,6 +55,11 @@ export default function Settings() {
     } else {
       localStorage.removeItem("jira_pat");
     }
+    if (geminiKey.trim()) {
+      localStorage.setItem("gemini_api_key", geminiKey.trim());
+    } else {
+      localStorage.removeItem("gemini_api_key");
+    }
     localStorage.setItem("jira_url", jiraUrl.trim() || JIRA_BASE_URL);
 
     // Test connection
@@ -65,8 +72,10 @@ export default function Settings() {
     localStorage.removeItem("jira_pat");
     localStorage.removeItem("jira_basic");
     localStorage.removeItem("jira_url");
+    localStorage.removeItem("gemini_api_key");
     setPat("");
     setJiraUrl(JIRA_BASE_URL);
+    setGeminiKey("");
     setConnStatus(null);
     addToast("info", "🗑️ Đã xóa thông tin kết nối");
   };
@@ -192,6 +201,51 @@ export default function Settings() {
                 🗑️ Xóa
               </button>
             </div>
+          </div>
+
+          {/* AI Assistant Config */}
+          <div className="settings-section">
+            <div className="settings-section-title">🤖 Cấu hình AI Assistant</div>
+            <div className="settings-section-desc">
+              Cấu hình Google Gemini API Key để tự động viết ghi chú công việc (Worklog Comment) chất lượng cao bằng AI.
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="input-gemini-key">
+                Google Gemini API Key
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  style={{ marginLeft: 8, padding: "2px 6px", fontSize: 11 }}
+                  onClick={() => setShowGeminiKey((v) => !v)}
+                >
+                  {showGeminiKey ? "🙈 Ẩn" : "👁️ Hiện"}
+                </button>
+              </label>
+              <input
+                id="input-gemini-key"
+                type={showGeminiKey ? "text" : "password"}
+                value={geminiKey}
+                onChange={(e) => setGeminiKey(e.target.value)}
+                placeholder="Nhập Google Gemini API Key của bạn (AI Studio)..."
+                autoComplete="off"
+              />
+            </div>
+
+            <details style={{ marginBottom: 16 }}>
+              <summary style={{ fontSize: 13, color: "var(--accent-blue-light)", cursor: "pointer", fontWeight: 600, listStyle: "none" }}>
+                📖 Cách lấy Gemini API Key miễn phí?
+              </summary>
+              <div style={{ marginTop: 12, padding: "14px 16px", background: "rgba(79, 142, 247, 0.05)", border: "1px solid rgba(79, 142, 247, 0.15)", borderRadius: 10, fontSize: 13, lineHeight: 1.8 }}>
+                <ol style={{ paddingLeft: 18, color: "var(--text-secondary)" }}>
+                  <li>Truy cập cổng Google AI Studio: <a href="https://aistudio.google.com/" target="_blank" rel="noreferrer" style={{ color: "var(--accent-blue-light)" }}>aistudio.google.com</a></li>
+                  <li>Đăng nhập bằng tài khoản Google của bạn.</li>
+                  <li>Click vào nút <strong style={{ color: "var(--text-primary)" }}>Get API key</strong> ở góc trên bên trái.</li>
+                  <li>Click <strong style={{ color: "var(--text-primary)" }}>Create API key</strong>, chọn một Google Cloud Project bất kỳ (hoặc tạo mới) rồi nhấn tạo.</li>
+                  <li>Copy mã API Key nhận được, dán vào ô bên trên và bấm nút <strong style={{ color: "var(--text-primary)" }}>Lưu cài đặt</strong> ở trên!</li>
+                </ol>
+              </div>
+            </details>
           </div>
 
           {/* Azure Info */}

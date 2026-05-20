@@ -121,9 +121,32 @@ export default function BulkCreate() {
         // Nếu bật tự động log, thực hiện log work 7h
         if (autoLogWork) {
           const startedStr = currentLogDate.toISOString().replace("Z", "+0000");
+          
+          let logComment = `Thực hiện công việc: ${summaries[i]}`;
+          const geminiKey = localStorage.getItem("gemini_api_key");
+          if (geminiKey) {
+            try {
+              const prompt = `Bạn là một kỹ sư phần mềm chuyên nghiệp. Hãy viết 1 câu ngắn gọn (dưới 15 từ) ghi chú lại công việc đã thực hiện cho task Jira có tiêu đề: "${summaries[i]}". Ví dụ: "Đã hoàn thành tối ưu hóa truy vấn SQL và sửa lỗi bộ lọc". Viết bằng tiếng Việt, trực tiếp, bắt đầu bằng từ hành động như "Hoàn thành...", "Cải tiến...", "Tối ưu...", "Sửa lỗi...", không dài dòng, không có phần giới thiệu, không thêm bất kỳ định dạng markdown hay dấu ngoặc kép nào xung quanh.`;
+              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+              });
+              if (response.ok) {
+                const data = await response.json();
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+                if (text) {
+                  logComment = text;
+                }
+              }
+            } catch (e) {
+              console.warn("AI generation failed for worklog comment in BulkCreate, using fallback.", e);
+            }
+          }
+
           await addWorklog(created.key, {
             timeSpentSeconds: 7 * 3600, // 7h
-            comment: `Thực hiện công việc: ${summaries[i]}`,
+            comment: logComment,
             started: startedStr,
             adjustEstimate: "auto",
           });
