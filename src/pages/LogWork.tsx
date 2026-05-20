@@ -78,7 +78,7 @@ export default function LogWork() {
 
       const prompt = `Bạn là một kỹ sư phần mềm chuyên nghiệp. Hãy viết 1 câu ngắn gọn (dưới 15 từ) ghi chú lại công việc đã thực hiện cho task Jira có tiêu đề: "${summary}". Ví dụ: "Đã hoàn thành tối ưu hóa truy vấn SQL và sửa lỗi bộ lọc". Viết bằng tiếng Việt, trực tiếp, bắt đầu bằng từ hành động như "Hoàn thành...", "Cải tiến...", "Tối ưu...", "Sửa lỗi...", không dài dòng, không có phần giới thiệu, không thêm bất kỳ định dạng markdown hay dấu ngoặc kép nào xung quanh.`;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -91,7 +91,18 @@ export default function LogWork() {
       });
 
       if (!response.ok) {
-        throw new Error("Lỗi gọi API Gemini. Vui lòng kiểm tra lại API Key.");
+        let errorMsg = "Lỗi kết nối Gemini API.";
+        try {
+          const errData = await response.json();
+          if (errData.error?.message) {
+            errorMsg = errData.error.message;
+          } else if (errData.message) {
+            errorMsg = errData.message;
+          }
+        } catch {
+          // ignore
+        }
+        throw new Error(`${errorMsg} (Mã lỗi: ${response.status})`);
       }
 
       const data = await response.json();
@@ -223,7 +234,7 @@ export default function LogWork() {
             try {
               const summary = issueObj.fields.summary;
               const prompt = `Bạn là một kỹ sư phần mềm chuyên nghiệp. Hãy viết 1 câu ngắn gọn (dưới 15 từ) ghi chú lại công việc đã thực hiện cho task Jira có tiêu đề: "${summary}". Ví dụ: "Đã hoàn thành tối ưu hóa truy vấn SQL và sửa lỗi bộ lọc". Viết bằng tiếng Việt, trực tiếp, bắt đầu bằng từ hành động như "Hoàn thành...", "Cải tiến...", "Tối ưu...", "Sửa lỗi...", không dài dòng, không có phần giới thiệu, không thêm bất kỳ định dạng markdown hay dấu ngoặc kép nào xung quanh.`;
-              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
+              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
@@ -231,6 +242,13 @@ export default function LogWork() {
               if (response.ok) {
                 const data = await response.json();
                 finalComment = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+              } else {
+                let errText = `HTTP ${response.status}`;
+                try {
+                  const errData = await response.json();
+                  errText = errData.error?.message || errData.message || errText;
+                } catch {}
+                console.warn(`Auto AI comment failed: ${errText}`);
               }
             } catch (e) {
               console.warn("Auto AI generation failed, falling back to static template", e);

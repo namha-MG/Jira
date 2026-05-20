@@ -127,7 +127,7 @@ export default function BulkCreate() {
           if (geminiKey) {
             try {
               const prompt = `Bạn là một kỹ sư phần mềm chuyên nghiệp. Hãy viết 1 câu ngắn gọn (dưới 15 từ) ghi chú lại công việc đã thực hiện cho task Jira có tiêu đề: "${summaries[i]}". Ví dụ: "Đã hoàn thành tối ưu hóa truy vấn SQL và sửa lỗi bộ lọc". Viết bằng tiếng Việt, trực tiếp, bắt đầu bằng từ hành động như "Hoàn thành...", "Cải tiến...", "Tối ưu...", "Sửa lỗi...", không dài dòng, không có phần giới thiệu, không thêm bất kỳ định dạng markdown hay dấu ngoặc kép nào xung quanh.`;
-              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
+              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
@@ -138,6 +138,13 @@ export default function BulkCreate() {
                 if (text) {
                   logComment = text;
                 }
+              } else {
+                let errText = `HTTP ${response.status}`;
+                try {
+                  const errData = await response.json();
+                  errText = errData.error?.message || errData.message || errText;
+                } catch {}
+                console.warn(`BulkCreate AI comment failed: ${errText}`);
               }
             } catch (e) {
               console.warn("AI generation failed for worklog comment in BulkCreate, using fallback.", e);
