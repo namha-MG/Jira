@@ -256,6 +256,57 @@ export default function Dashboard() {
     "Remaining (h)":Math.round(p.remainingSeconds / 3600),
   }));
 
+  // ── Weekly statistics logic ──
+  const getStartOfWeek = (d: Date) => {
+    const date = new Date(d);
+    const day = date.getDay();
+    const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(date.setDate(diff));
+    monday.setHours(0, 0, 0, 0);
+    return monday;
+  };
+
+  const currentMonday = getStartOfWeek(new Date());
+  
+  const lastMonday = new Date(currentMonday);
+  lastMonday.setDate(lastMonday.getDate() - 7);
+
+  const nextMonday = new Date(currentMonday);
+  nextMonday.setDate(nextMonday.getDate() + 7);
+
+  const dayNames = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ Nhật"];
+  const dailyLoggedSeconds = Array(7).fill(0);
+  let thisWeekTotalSeconds = 0;
+  let lastWeekTotalSeconds = 0;
+
+  issues.forEach((issue) => {
+    issue.fields.worklog?.worklogs?.forEach((wl) => {
+      const wlDate = new Date(wl.started);
+      const wlTime = wlDate.getTime();
+
+      // Check last week
+      if (wlTime >= lastMonday.getTime() && wlTime < currentMonday.getTime()) {
+        lastWeekTotalSeconds += wl.timeSpentSeconds;
+      }
+
+      // Check current week
+      if (wlTime >= currentMonday.getTime() && wlTime < nextMonday.getTime()) {
+        thisWeekTotalSeconds += wl.timeSpentSeconds;
+
+        const dayOfWeek = wlDate.getDay();
+        const dayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        if (dayIndex >= 0 && dayIndex < 7) {
+          dailyLoggedSeconds[dayIndex] += wl.timeSpentSeconds;
+        }
+      }
+    });
+  });
+
+  const weeklyChartData = dayNames.map((name, idx) => ({
+    name,
+    "Giờ đã log (h)": parseFloat((dailyLoggedSeconds[idx] / 3600).toFixed(2)),
+  }));
+
   // ── Recent issues ──
   const recentIssues = [...filteredIssues]
     .sort((a, b) => new Date(b.fields.updated).getTime() - new Date(a.fields.updated).getTime())
@@ -439,6 +490,86 @@ export default function Dashboard() {
               </div>
             </div>
 
+            {/* Weekly Statistics Section */}
+            <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 16, marginBottom: 16 }}>
+              {/* Weekly bar chart */}
+              <div className="chart-card">
+                <div className="chart-title">Nỗ lực log work trong tuần này</div>
+                <div className="chart-subtitle">Thời gian đã log theo từng ngày (giờ)</div>
+                <div style={{ marginTop: 12 }}>
+                  <ResponsiveContainer width="100%" height={180}>
+                    <BarChart data={weeklyChartData} margin={{ top: 8, right: 0, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                      <XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        contentStyle={{ background: "#0f1527", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, fontSize: 12 }}
+                        itemStyle={{ color: "#f1f5f9" }}
+                        labelStyle={{ color: "#f1f5f9", fontWeight: 600 }}
+                      />
+                      <Bar dataKey="Giờ đã log (h)" fill="#10b981" radius={[4,4,0,0]} barSize={24} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Weekly comparison card */}
+              <div className="chart-card" style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                <div>
+                  <div className="chart-title">So sánh hiệu suất tuần</div>
+                  <div className="chart-subtitle">So sánh nỗ lực tuần này với tuần trước</div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, margin: "16px 0" }}>
+                  <div style={{ background: "rgba(16, 185, 129, 0.05)", border: "1px solid rgba(16, 185, 129, 0.15)", borderRadius: 12, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Tuần này</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: "var(--accent-green)" }}>
+                      {parseFloat((thisWeekTotalSeconds / 3600).toFixed(1))}h
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
+                      Thứ 2 - Chủ Nhật
+                    </div>
+                  </div>
+
+                  <div style={{ background: "rgba(255, 255, 255, 0.02)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Tuần trước</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: "var(--text-secondary)" }}>
+                      {parseFloat((lastWeekTotalSeconds / 3600).toFixed(1))}h
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
+                      Hiệu suất trước đó
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progress message / Micro action */}
+                <div style={{ 
+                  background: "var(--bg-card)", 
+                  border: "1px solid var(--border)", 
+                  borderRadius: 12, 
+                  padding: "12px 14px", 
+                  fontSize: 12, 
+                  color: "var(--text-secondary)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10
+                }}>
+                  <div style={{ fontSize: 20 }}>
+                    {thisWeekTotalSeconds >= 144000 ? "🏆" : thisWeekTotalSeconds >= 72000 ? "💪" : "⏰"}
+                  </div>
+                  <div>
+                    {thisWeekTotalSeconds >= 144000 ? (
+                      <div><strong>Xuất sắc!</strong> Bạn đã hoàn thành xuất sắc mục tiêu log work tuần này (&gt;40h).</div>
+                    ) : thisWeekTotalSeconds >= 72000 ? (
+                      <div><strong>Cố lên!</strong> Bạn đã log được hơn nửa tuần làm việc (&gt;20h).</div>
+                    ) : (
+                      <div><strong>Nhắc nhở:</strong> Hãy nhớ log đầy đủ giờ làm việc của tuần này nhé.</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Charts grid */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16, marginBottom: 16 }}>
               {/* Bar chart by project */}
@@ -452,6 +583,7 @@ export default function Dashboard() {
                     <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
                     <Tooltip
                       contentStyle={{ background: "#0f1527", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, fontSize: 12 }}
+                      itemStyle={{ color: "#f1f5f9" }}
                       labelStyle={{ color: "#f1f5f9", fontWeight: 600 }}
                     />
                     <Legend iconType="circle" wrapperStyle={{ fontSize: 11, color: "#94a3b8" }} />
@@ -486,6 +618,8 @@ export default function Dashboard() {
                     </Pie>
                     <Tooltip
                       contentStyle={{ background: "#0f1527", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, fontSize: 12 }}
+                      itemStyle={{ color: "#f1f5f9" }}
+                      labelStyle={{ color: "#f1f5f9", fontWeight: 600 }}
                     />
                   </PieChart>
                 </ResponsiveContainer>

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  getIssuesByProject, getWorklogs, JiraIssue, JiraWorklog, formatSeconds,
+  getIssuesByProject, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds,
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
@@ -25,12 +25,18 @@ export default function Issues() {
   const [error, setError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [assigneeFilter, setAssigneeFilter] = useState("all");
   const [selectedIssue, setSelectedIssue] = useState<JiraIssue | null>(null);
   const [worklogs, setWorklogs] = useState<JiraWorklog[]>([]);
   const [worklogLoading, setWorklogLoading] = useState(false);
   const [timeRange, setTimeRange] = useState<"month" | "all">("month");
   const [sortBy, setSortBy] = useState<"key" | "updated" | "logged" | "estimate">("updated");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  useEffect(() => {
+    setStatusFilter("all");
+    setAssigneeFilter("all");
+  }, [selectedProject]);
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
 
@@ -97,7 +103,11 @@ export default function Issues() {
         matchTime = updatedDate >= startOfMonth || !!hasWorklogThisMonth;
       }
 
-      return matchText && matchStatus && matchTime;
+      const matchAssignee = assigneeFilter === "all" ||
+        (assigneeFilter === "unassigned" && !i.fields.assignee) ||
+        (i.fields.assignee && (i.fields.assignee.name || i.fields.assignee.accountId || i.fields.assignee.emailAddress) === assigneeFilter);
+
+      return matchText && matchStatus && matchTime && matchAssignee;
     })
     .sort((a, b) => {
       let va = 0, vb = 0;
@@ -124,6 +134,12 @@ export default function Issues() {
     });
 
   const uniqueStatuses = [...new Set(issues.map((i) => i.fields.status.name))];
+  const uniqueAssignees = [...new Map(
+    issues
+      .map((i) => i.fields.assignee)
+      .filter((a): a is JiraUser => a !== null && a !== undefined)
+      .map((a) => [a.name || a.accountId || a.emailAddress, a])
+  ).values()];
 
   if (!isConfigured) {
     return (
@@ -224,6 +240,23 @@ export default function Issues() {
               <option value="all">Tất cả status</option>
               {uniqueStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
+            <select
+              id="select-assignee-filter"
+              value={assigneeFilter}
+              onChange={(e) => setAssigneeFilter(e.target.value)}
+              style={{ width: 150 }}
+            >
+              <option value="all">Tất cả Assignee</option>
+              <option value="unassigned">Chưa phân công</option>
+              {uniqueAssignees.map((a) => {
+                const userKey = a.name || a.accountId || a.emailAddress;
+                return (
+                  <option key={userKey} value={userKey}>
+                    {a.displayName}
+                  </option>
+                );
+              })}
+            </select>
           </div>
         </div>
 
@@ -238,6 +271,7 @@ export default function Issues() {
               <tr>
                 <th onClick={() => handleSort("key")} style={{ cursor: "pointer" }}>Key{sortIndicator("key")}</th>
                 <th>Tóm tắt</th>
+                <th>Người xử lý</th>
                 <th>Trạng thái</th>
                 <th>Loại</th>
                 <th onClick={() => handleSort("estimate")} style={{ cursor: "pointer" }}>Estimate{sortIndicator("estimate")}</th>
@@ -258,7 +292,7 @@ export default function Issues() {
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={10}>
                     <div className="empty-state" style={{ padding: 32 }}>
                       <div className="empty-state-icon">📭</div>
                       <div className="empty-state-title">Không có issues</div>
@@ -289,6 +323,22 @@ export default function Issues() {
                         <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)", fontSize: 13 }}>
                           {issue.fields.summary}
                         </div>
+                      </td>
+                      <td>
+                        {issue.fields.assignee ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <img
+                              src={issue.fields.assignee.avatarUrls["48x48"]}
+                              alt={issue.fields.assignee.displayName}
+                              style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid var(--border)" }}
+                            />
+                            <span style={{ fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 100 }} title={issue.fields.assignee.displayName}>
+                              {issue.fields.assignee.displayName}
+                            </span>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>Chưa phân công</span>
+                        )}
                       </td>
                       <td>
                         <span className={getBadgeClass(issue.fields.status.name)}>
