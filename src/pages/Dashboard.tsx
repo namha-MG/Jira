@@ -307,6 +307,24 @@ export default function Dashboard() {
     "Giờ đã log (h)": parseFloat((dailyLoggedSeconds[idx] / 3600).toFixed(2)),
   }));
 
+  // ── Estimate vs Logged deviation ──
+  const issuesWithDeviation = filteredIssues
+    .map((issue) => {
+      const est = issue.fields.timetracking?.originalEstimateSeconds || 0;
+      const log = issue.fields.timetracking?.timeSpentSeconds || 0;
+      const rem = issue.fields.timetracking?.remainingEstimateSeconds || 0;
+      if (est <= 0) return null;
+      const diff = log - est;
+      return { issue, est, log, rem, diff };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Math.abs(b!.diff) - Math.abs(a!.diff));
+
+  const overBudget = issuesWithDeviation.filter(i => i!.diff > 0);
+  const underBudget = issuesWithDeviation.filter(i => i!.diff <= 0);
+  const totalOverSeconds = overBudget.reduce((s, i) => s + i!.diff, 0);
+  const totalUnderSeconds = underBudget.reduce((s, i) => s + Math.abs(i!.diff), 0);
+
   // ── Recent issues ──
   const recentIssues = [...filteredIssues]
     .sort((a, b) => new Date(b.fields.updated).getTime() - new Date(a.fields.updated).getTime())
@@ -632,6 +650,98 @@ export default function Dashboard() {
                     </div>
                   ))}
                 </div>
+              </div>
+            </div>
+
+            {/* Estimate vs Logged Deviation */}
+            <div className="chart-card">
+              <div className="chart-title">Độ lệch Estimate vs Logged</div>
+              <div className="chart-subtitle">
+                {timeRange === "all" ? "Tất cả thời gian" : "Tháng này"}
+              </div>
+
+              {/* Summary bars */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <div style={{ background: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.2)", borderRadius: 12, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Quá estimate (total)</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "var(--accent-red)" }}>
+                    +{formatSeconds(totalOverSeconds)}
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>{overBudget.length} ticket</div>
+                </div>
+                <div style={{ background: "rgba(79, 142, 247, 0.08)", border: "1px solid rgba(79, 142, 247, 0.2)", borderRadius: 12, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Còn lại (total)</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "var(--accent-blue-light)" }}>
+                    -{formatSeconds(totalUnderSeconds)}
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>{underBudget.length} ticket</div>
+                </div>
+              </div>
+
+              {/* Deviation table */}
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--border)", textAlign: "left" }}>
+                      <th style={{ padding: "6px 8px", color: "var(--text-muted)", fontWeight: 500 }}>Key</th>
+                      <th style={{ padding: "6px 8px", color: "var(--text-muted)", fontWeight: 500 }}>Estimate</th>
+                      <th style={{ padding: "6px 8px", color: "var(--text-muted)", fontWeight: 500 }}>Logged</th>
+                      <th style={{ padding: "6px 8px", color: "var(--text-muted)", fontWeight: 500 }}>Diff</th>
+                      <th style={{ padding: "6px 8px", color: "var(--text-muted)", fontWeight: 500 }}>%</th>
+                      <th style={{ padding: "6px 8px", color: "var(--text-muted)", fontWeight: 500 }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {issuesWithDeviation.slice(0, 10).map((item) => {
+                      if (!item) return null;
+                      const { issue, est, log, rem, diff } = item;
+                      const pct = est > 0 ? Math.round((log / est) * 100) : 0;
+                      const diffH = diff / 3600;
+                      return (
+                        <tr key={issue.key} style={{ borderBottom: "1px solid var(--border)" }}>
+                          <td style={{ padding: "8px" }}>
+                            <a
+                              href={`https://20.84.97.109:3033/browse/${issue.key}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ color: "var(--accent-blue-light)", fontWeight: 600, textDecoration: "none", fontSize: 12 }}
+                            >
+                              {issue.key}
+                            </a>
+                          </td>
+                          <td style={{ padding: "8px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{formatSeconds(est)}</td>
+                          <td style={{ padding: "8px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{formatSeconds(log)}</td>
+                          <td style={{ padding: "8px", fontWeight: 600, whiteSpace: "nowrap" }}>
+                            <span style={{ color: diff > 0 ? "var(--accent-red)" : "var(--accent-blue-light)" }}>
+                              {diff > 0 ? "+" : ""}{diffH.toFixed(1)}h
+                            </span>
+                          </td>
+                          <td style={{ padding: "8px", textAlign: "center" }}>
+                            <span style={{ 
+                              color: pct > 100 ? "var(--accent-red)" : pct > 80 ? "#f59e0b" : "var(--accent-green)",
+                              fontWeight: 600,
+                              fontSize: 12
+                            }}>
+                              {pct}%
+                            </span>
+                          </td>
+                          <td style={{ padding: "8px" }}>
+                            <span className={getBadgeClass(issue.fields.status.name)}>
+                              {issue.fields.status.name}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {issuesWithDeviation.filter(Boolean).length === 0 && (
+                      <tr>
+                        <td colSpan={6} style={{ padding: 24, textAlign: "center", color: "var(--text-muted)" }}>
+                          Không có ticket nào cần estimate
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
