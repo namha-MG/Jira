@@ -102,7 +102,7 @@ export default function Dashboard() {
 
     for (const task of targetsToClose) {
       const key = task.key;
-      setTransitionStatus(`Đang xử lý ${key}: ${task.fields.summary.slice(0, 30)}...`);
+      setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key}`);
       try {
         let transitions = await getTransitions(key);
 
@@ -116,6 +116,7 @@ export default function Dashboard() {
           inprogressKeywords.some(kw => t.name.toLowerCase().includes(kw))
         );
         if (toInProgress) {
+          setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toInProgress.to.name}`);
           await transitionIssue(key, toInProgress.id);
           transitions = await getTransitions(key);
         }
@@ -126,6 +127,7 @@ export default function Dashboard() {
           resolvedKeywords.some(kw => t.name.toLowerCase().includes(kw))
         );
         if (toResolved) {
+          setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toResolved.to.name}`);
           await transitionIssue(key, toResolved.id);
           transitions = await getTransitions(key);
         }
@@ -136,6 +138,7 @@ export default function Dashboard() {
           closedKeywords.some(kw => t.name.toLowerCase().includes(kw))
         );
         if (toClosed) {
+          setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toClosed.to.name}`);
           await transitionIssue(key, toClosed.id);
         }
 
@@ -461,22 +464,13 @@ export default function Dashboard() {
       </div>
 
       <div className="page-body">
+        {/* Progress Modal */}
         {transitioning && (
-          <div className="toast" style={{ 
-            marginBottom: 16, 
-            background: "rgba(139, 92, 246, 0.1)", 
-            border: "1px solid rgba(139, 92, 246, 0.2)",
-            color: "var(--text-primary)",
-            padding: "16px 20px",
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            borderRadius: 16
-          }}>
-            <div className="spinning" style={{ fontSize: 20 }}>⚙️</div>
-            <div style={{ flex: 1 }}>
-              <strong style={{ display: "block", fontSize: 14 }}>Đang tự động chuyển trạng thái tuần tự...</strong>
-              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{transitionStatus}</span>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+            <div style={{ background: "var(--bg-secondary)", borderRadius: 16, width: 400, padding: 32, display: "flex", flexDirection: "column", alignItems: "center", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)", textAlign: "center" }}>
+              <div className="spinning" style={{ fontSize: 48, marginBottom: 16 }}>⚙️</div>
+              <h3 style={{ margin: 0, fontSize: 18, color: "var(--text-primary)", marginBottom: 8 }}>Đang đóng task...</h3>
+              <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{transitionStatus}</div>
             </div>
           </div>
         )}
