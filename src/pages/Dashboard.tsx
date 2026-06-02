@@ -46,14 +46,17 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [timeRange, setTimeRange] = useState<"month" | "all">("month");
+  const [timeRange, setTimeRange] = useState<"month" | "prevMonth" | "all">("month");
   
   const [transitioning, setTransitioning] = useState(false);
   const [transitionStatus, setTransitionStatus] = useState("");
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [closableTargets, setClosableTargets] = useState<JiraIssue[]>([]);
+  const [selectedTargets, setSelectedTargets] = useState<Set<string>>(new Set());
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
 
-  const autoCloseLoggedTasks = async () => {
+  const autoCloseLoggedTasks = () => {
     // Tìm các task có:
     // 1. logged >= estimate (originalEstimateSeconds > 0)
     // 2. remaining === 0
@@ -83,18 +86,21 @@ export default function Dashboard() {
       return;
     }
 
-    if (
-      !confirm(
-        `Tìm thấy ${targets.length} task đã log đủ thời gian nhưng chưa đóng.\nBạn có muốn tự động chuyển trạng thái tuần tự cho tất cả các task này sang Closed không?`
-      )
-    ) {
-      return;
-    }
+    setClosableTargets(targets);
+    setSelectedTargets(new Set(targets.map(t => t.key)));
+    setShowCloseModal(true);
+  };
 
+  const executeAutoClose = async () => {
+    if (selectedTargets.size === 0) return;
+    setShowCloseModal(false);
+    
     setTransitioning(true);
     let successCount = 0;
+    
+    const targetsToClose = closableTargets.filter(t => selectedTargets.has(t.key));
 
-    for (const task of targets) {
+    for (const task of targetsToClose) {
       const key = task.key;
       setTransitionStatus(`Đang xử lý ${key}: ${task.fields.summary.slice(0, 30)}...`);
       try {
@@ -141,7 +147,7 @@ export default function Dashboard() {
 
     setTransitioning(false);
     setTransitionStatus("");
-    alert(`✅ Hoàn thành! Đã chuyển trạng thái thành công cho ${successCount}/${targets.length} task.`);
+    alert(`✅ Hoàn thành! Đã chuyển trạng thái thành công cho ${successCount}/${targetsToClose.length} task.`);
     fetchData(); // Refresh dashboard
   };
 
@@ -169,6 +175,8 @@ export default function Dashboard() {
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const endOfPrevMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
 
   // Lọc Issues theo phạm vi thời gian
   const filteredIssues = issues.filter((i) => {
@@ -185,30 +193,52 @@ export default function Dashboard() {
 
     if (timeRange === "all") return true;
     
-    // Giữ lại issue nếu nó được cập nhật trong tháng này
-    const updatedDate = new Date(i.fields.updated);
-    if (updatedDate >= startOfMonth) return true;
+    let rangeStart = startOfMonth;
+    let rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    if (timeRange === "prevMonth") {
+      rangeStart = startOfPrevMonth;
+      rangeEnd = endOfPrevMonth;
+    }
 
-    // Hoặc nếu nó có chứa worklog được log trong tháng này
-    const hasWorklogThisMonth = i.fields.worklog?.worklogs?.some(
-      (wl) => new Date(wl.started) >= startOfMonth
+    // Giữ lại issue nếu nó được cập nhật trong khoảng thời gian này
+    const updatedDate = new Date(i.fields.updated);
+    if (updatedDate >= rangeStart && updatedDate <= rangeEnd) return true;
+
+    // Hoặc nếu nó có chứa worklog được log trong khoảng thời gian này
+    const hasWorklogThisPeriod = i.fields.worklog?.worklogs?.some(
+      (wl) => {
+        const d = new Date(wl.started);
+        return d >= rangeStart && d <= rangeEnd;
+      }
     );
-    return !!hasWorklogThisMonth;
+    return !!hasWorklogThisPeriod;
   });
 
   // ── Aggregated stats ──
   const totalEstimated = filteredIssues.reduce((s, i) => s + (i.fields.timetracking?.originalEstimateSeconds || 0), 0);
   
-  // Tính tổng thời gian đã log: nếu chọn theo tháng, chỉ cộng dồn worklog của tháng này
+  // Tính tổng thời gian đã log: chỉ tính những ticket đã được closed
   const totalLogged = filteredIssues.reduce((sum, issue) => {
+    const statusName = issue.fields.status?.name?.toLowerCase() || "";
+    if (!statusName.includes("close") && !statusName.includes("đóng")) {
+      return sum;
+    }
+
     if (timeRange === "all") {
       return sum + (issue.fields.timetracking?.timeSpentSeconds || 0);
     } else {
-      const monthLogs = issue.fields.worklog?.worklogs?.reduce((s, wl) => {
+      let rangeStart = startOfMonth;
+      let rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      if (timeRange === "prevMonth") {
+        rangeStart = startOfPrevMonth;
+        rangeEnd = endOfPrevMonth;
+      }
+
+      const periodLogs = issue.fields.worklog?.worklogs?.reduce((s, wl) => {
         const wlDate = new Date(wl.started);
-        return wlDate >= startOfMonth ? s + wl.timeSpentSeconds : s;
+        return (wlDate >= rangeStart && wlDate <= rangeEnd) ? s + wl.timeSpentSeconds : s;
       }, 0) || 0;
-      return sum + monthLogs;
+      return sum + periodLogs;
     }
   }, 0);
 
@@ -231,11 +261,18 @@ export default function Dashboard() {
       if (timeRange === "all") {
         return sum + (issue.fields.timetracking?.timeSpentSeconds || 0);
       } else {
-        const monthLogs = issue.fields.worklog?.worklogs?.reduce((s, wl) => {
+        let rangeStart = startOfMonth;
+        let rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        if (timeRange === "prevMonth") {
+          rangeStart = startOfPrevMonth;
+          rangeEnd = endOfPrevMonth;
+        }
+
+        const periodLogs = issue.fields.worklog?.worklogs?.reduce((s, wl) => {
           const wlDate = new Date(wl.started);
-          return wlDate >= startOfMonth ? s + wl.timeSpentSeconds : s;
+          return (wlDate >= rangeStart && wlDate <= rangeEnd) ? s + wl.timeSpentSeconds : s;
         }, 0) || 0;
-        return sum + monthLogs;
+        return sum + periodLogs;
       }
     }, 0);
 
@@ -321,7 +358,7 @@ export default function Dashboard() {
     .sort((a, b) => Math.abs(b!.diff) - Math.abs(a!.diff));
 
   const overBudget = issuesWithDeviation.filter(i => i!.diff > 0);
-  const underBudget = issuesWithDeviation.filter(i => i!.diff <= 0);
+  const underBudget = issuesWithDeviation.filter(i => i!.diff < 0);
   const totalOverSeconds = overBudget.reduce((s, i) => s + i!.diff, 0);
   const totalUnderSeconds = underBudget.reduce((s, i) => s + Math.abs(i!.diff), 0);
 
@@ -376,6 +413,13 @@ export default function Dashboard() {
             style={{ fontSize: 12, padding: "6px 12px", borderRadius: 8 }}
           >
             📅 Tháng này ({now.getMonth() + 1}/{now.getFullYear()})
+          </button>
+          <button
+            className={`btn btn-sm ${timeRange === "prevMonth" ? "btn-primary" : "btn-secondary"}`}
+            onClick={() => setTimeRange("prevMonth")}
+            style={{ fontSize: 12, padding: "6px 12px", borderRadius: 8 }}
+          >
+            ⏪ Tháng trước ({startOfPrevMonth.getMonth() + 1}/{startOfPrevMonth.getFullYear()})
           </button>
           <button
             className={`btn btn-sm ${timeRange === "all" ? "btn-primary" : "btn-secondary"}`}
@@ -444,6 +488,65 @@ export default function Dashboard() {
           </div>
         )}
 
+        {showCloseModal && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+            <div style={{ background: "var(--bg-secondary)", borderRadius: 16, width: 640, maxWidth: "90vw", maxHeight: "80vh", display: "flex", flexDirection: "column", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}>
+              <div style={{ padding: 20, borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 18, color: "var(--text-primary)" }}>Chọn Task để đóng</h3>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>Những task này đã log đủ/vượt thời gian và cần được đóng.</div>
+                </div>
+                <button onClick={() => setShowCloseModal(false)} className="btn btn-ghost btn-sm">❌</button>
+              </div>
+              <div style={{ padding: 20, overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
+                {closableTargets.map(t => (
+                  <label key={t.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer" }}>
+                    <input 
+                      type="checkbox" 
+                      style={{ width: 18, height: 18, cursor: "pointer" }}
+                      checked={selectedTargets.has(t.key)}
+                      onChange={(e) => {
+                        const newSet = new Set(selectedTargets);
+                        if (e.target.checked) newSet.add(t.key);
+                        else newSet.delete(t.key);
+                        setSelectedTargets(newSet);
+                      }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                        <span style={{ color: "var(--accent-blue-light)", fontWeight: 600, fontSize: 13 }}>{t.key}</span>
+                        <span className={getBadgeClass(t.fields.status.name)} style={{ fontSize: 10, padding: "2px 6px" }}>{t.fields.status.name}</span>
+                      </div>
+                      <div style={{ color: "var(--text-primary)", fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {t.fields.summary}
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <div style={{ padding: 20, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}>
+                  <input 
+                    type="checkbox" 
+                    checked={selectedTargets.size === closableTargets.length}
+                    onChange={(e) => {
+                      if (e.target.checked) setSelectedTargets(new Set(closableTargets.map(t => t.key)));
+                      else setSelectedTargets(new Set());
+                    }}
+                  />
+                  Chọn tất cả
+                </label>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button onClick={() => setShowCloseModal(false)} className="btn btn-secondary">Hủy</button>
+                  <button onClick={executeAutoClose} className="btn btn-primary" disabled={selectedTargets.size === 0}>
+                    Xác nhận đóng ({selectedTargets.size}) task
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {loading ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div className="stats-grid">
@@ -477,7 +580,7 @@ export default function Dashboard() {
               <div className="stat-card">
                 <div className="stat-icon">⏱️</div>
                 <div className="stat-value">{formatSeconds(totalLogged)}</div>
-                <div className="stat-label">Đã Log</div>
+                <div className="stat-label">Đã Log (Closed)</div>
                 <div className={`stat-change ${logPct > 100 ? "negative" : logPct > 80 ? "neutral" : "positive"}`}>
                   {logPct}% so với estimate
                 </div>
@@ -657,7 +760,7 @@ export default function Dashboard() {
             <div className="chart-card">
               <div className="chart-title">Độ lệch Estimate vs Logged</div>
               <div className="chart-subtitle">
-                {timeRange === "all" ? "Tất cả thời gian" : "Tháng này"}
+                {timeRange === "all" ? "Tất cả thời gian" : timeRange === "prevMonth" ? "Tháng trước" : "Tháng này"}
               </div>
 
               {/* Summary bars */}
@@ -670,7 +773,7 @@ export default function Dashboard() {
                   <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>{overBudget.length} ticket</div>
                 </div>
                 <div style={{ background: "rgba(79, 142, 247, 0.08)", border: "1px solid rgba(79, 142, 247, 0.2)", borderRadius: 12, padding: "12px 14px" }}>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Còn lại (total)</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Log thiếu (total)</div>
                   <div style={{ fontSize: 18, fontWeight: 800, color: "var(--accent-blue-light)" }}>
                     -{formatSeconds(totalUnderSeconds)}
                   </div>
@@ -712,7 +815,9 @@ export default function Dashboard() {
                           <td style={{ padding: "8px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{formatSeconds(est)}</td>
                           <td style={{ padding: "8px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{formatSeconds(log)}</td>
                           <td style={{ padding: "8px", fontWeight: 600, whiteSpace: "nowrap" }}>
-                            <span style={{ color: diff > 0 ? "var(--accent-red)" : "var(--accent-blue-light)" }}>
+                            <span style={{ 
+                              color: diff > 0 ? "var(--accent-red)" : diff < 0 ? "#f59e0b" : "var(--text-secondary)" 
+                            }}>
                               {diff > 0 ? "+" : ""}{diffH.toFixed(1)}h
                             </span>
                           </td>
