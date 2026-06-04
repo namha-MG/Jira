@@ -247,6 +247,19 @@ export async function getProjects(): Promise<{ key: string; name: string; id: st
   }));
 }
 
+/** Lấy danh sách user có thể gán trong một project */
+export async function getAssignableUsers(projectKey: string): Promise<JiraUser[]> {
+  try {
+    const res = await jiraApi.get("/user/assignable/search", {
+      params: { project: projectKey }
+    });
+    return res.data;
+  } catch (err) {
+    console.warn("Failed to get assignable users for", projectKey, err);
+    return [];
+  }
+}
+
 /** Lấy metadata tạo issue động cho dự án (Hỗ trợ Jira 9.0+ và các bản cũ hơn) */
 export async function getProjectCreateMeta(projectKey: string): Promise<{ projectId: string; issuetypeId: string } | null> {
   try {

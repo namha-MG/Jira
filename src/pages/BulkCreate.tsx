@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { createIssue, addWorklog, JiraIssue, getLatestTaskDate } from "../jiraService";
+import React, { useState, useEffect } from "react";
+import { createIssue, addWorklog, JiraIssue, JiraUser, getLatestTaskDate, getAssignableUsers } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
 interface CreationLog {
@@ -26,9 +26,24 @@ export default function BulkCreate() {
   const [creationMode, setCreationMode] = useState<"manual" | "ai">("manual");
   const [aiContext, setAiContext] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analyzedTasks, setAnalyzedTasks] = useState<string[]>([]);
+  const [analyzedTasks, setAnalyzedTasks] = useState<{summary: string, assignee: string}[]>([]);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const ROLES = ["Frontend", "Backend", "Mobile", "Tester", "BA", "QA", "DevOps", "Scrum Master"];
+  
+  const [assignableUsers, setAssignableUsers] = useState<JiraUser[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
+
+  useEffect(() => {
+    if (isConfigured && selectedProject) {
+      setLoadingUsers(true);
+      getAssignableUsers(selectedProject)
+        .then(users => setAssignableUsers(users))
+        .catch(e => console.error("Failed to load assignable users", e))
+        .finally(() => setLoadingUsers(false));
+    }
+  }, [isConfigured, selectedProject]);
 
   // Helper tìm ngày làm việc kế tiếp (bỏ qua Thứ Bảy/Chủ Nhật)
   const getNextWorkday = (date: Date): Date => {
@@ -45,21 +60,22 @@ export default function BulkCreate() {
     return getNextWorkday(d);
   };
 
-  const handleBulkCreate = async (e: React.FormEvent | null, tasksToCreate?: string[]) => {
+  const handleBulkCreate = async (e: React.FormEvent | null, tasksToCreate?: {summary: string, assignee: string}[]) => {
     if (e) e.preventDefault();
     
     const summaries = tasksToCreate 
-      ? tasksToCreate.map((s) => s.trim()).filter((s) => s.length > 0)
+      ? tasksToCreate.filter((s) => s.summary.trim().length > 0)
       : bulkText
           .split("\n")
           .map((s) => s.trim())
-          .filter((s) => s.length > 0);
+          .filter((s) => s.length > 0)
+          .map((s) => ({ summary: s, assignee: assignee.trim() }));
 
     if (summaries.length === 0) return;
 
     setIsRunning(true);
     const initialLogs = summaries.map((s) => ({
-      summary: s,
+      summary: s.summary,
       status: "pending" as const,
     }));
     setLogs(initialLogs);
@@ -115,8 +131,8 @@ export default function BulkCreate() {
 
         const created: JiraIssue = await createIssue({
           projectKey: selectedProject,
-          summary: summaries[i],
-          assigneeName: assignee.trim() || undefined,
+          summary: summaries[i].summary,
+          assigneeName: summaries[i].assignee || undefined,
           originalEstimate: estimate,
           customFields: {
             "customfield_10300": startDateStr,
@@ -128,11 +144,11 @@ export default function BulkCreate() {
         if (autoLogWork) {
           const startedStr = currentLogDate.toISOString().replace("Z", "+0000");
           
-          let logComment = `Thực hiện công việc: ${summaries[i]}`;
+          let logComment = `Thực hiện công việc: ${summaries[i].summary}`;
           const geminiKey = localStorage.getItem("gemini_api_key");
           if (geminiKey) {
             try {
-              const prompt = `Bạn là một kỹ sư phần mềm chuyên nghiệp. Hãy viết 1 câu ngắn gọn (dưới 15 từ) ghi chú lại công việc đã thực hiện cho task Jira có tiêu đề: "${summaries[i]}". Ví dụ: "Đã hoàn thành tối ưu hóa truy vấn SQL và sửa lỗi bộ lọc". Viết bằng tiếng Việt, trực tiếp, bắt đầu bằng từ hành động như "Hoàn thành...", "Cải tiến...", "Tối ưu...", "Sửa lỗi...", không dài dòng, không có phần giới thiệu, không thêm bất kỳ định dạng markdown hay dấu ngoặc kép nào xung quanh.`;
+              const prompt = `Bạn là một kỹ sư phần mềm chuyên nghiệp. Hãy viết 1 câu ngắn gọn (dưới 15 từ) ghi chú lại công việc đã thực hiện cho task Jira có tiêu đề: "${summaries[i].summary}". Ví dụ: "Đã hoàn thành tối ưu hóa truy vấn SQL và sửa lỗi bộ lọc". Viết bằng tiếng Việt, trực tiếp, bắt đầu bằng từ hành động như "Hoàn thành...", "Cải tiến...", "Tối ưu...", "Sửa lỗi...", không dài dòng, không có phần giới thiệu, không thêm bất kỳ định dạng markdown hay dấu ngoặc kép nào xung quanh.`;
               const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -203,8 +219,9 @@ export default function BulkCreate() {
 
     setIsAnalyzing(true);
     try {
+      const roleStr = selectedRoles.length > 0 ? `CHÚ Ý: Chỉ trích xuất các task thuộc về các vai trò (role) sau: ${selectedRoles.join(', ')}.\n` : "";
       const prompt = `Bạn là một trợ lý ảo phân tích công việc. Tôi sẽ cung cấp một đoạn văn bản mô tả các công việc đã làm. Hãy phân tích và trích xuất ra một danh sách các đầu việc nhỏ (task).
-Mỗi đầu việc phải ngắn gọn, súc tích, bắt đầu bằng động từ hành động (ví dụ: Viết API..., Thiết kế..., Sửa lỗi...).
+${roleStr}Mỗi đầu việc phải ngắn gọn, súc tích, bắt đầu bằng động từ hành động (ví dụ: Viết API..., Thiết kế..., Sửa lỗi...).
 Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 1 dòng, không có dấu gạch đầu dòng, không đánh số thứ tự, không có tiêu đề, không markdown.
 Đoạn văn bản: "${aiContext}"`;
 
@@ -224,7 +241,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
       if (text) {
         // Tách dòng và loại bỏ dấu gạch ngang đầu dòng (nếu có)
         const tasks = text.split("\n").map(t => t.replace(/^[-*]\s*/, '').trim()).filter(t => t.length > 0);
-        setAnalyzedTasks(tasks);
+        setAnalyzedTasks(tasks.map(t => ({ summary: t, assignee: assignee.trim() })));
         
         // Tìm ngày task cuối cùng
         const latestDate = await getLatestTaskDate([selectedProject], assignee.trim() || undefined);
@@ -311,16 +328,45 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                 </div>
 
                 <div className="form-group">
-                  <label>Tài khoản Assignee (Username)</label>
-                  <input
-                    type="text"
-                    placeholder="Ví dụ: namha (Để trống sẽ tự động assign cho bạn)"
+                  <label>Tài khoản Assignee Mặc định</label>
+                  <select
                     value={assignee}
                     onChange={(e) => setAssignee(e.target.value)}
-                    disabled={isAnalyzing}
-                  />
+                    disabled={isAnalyzing || loadingUsers}
+                  >
+                    <option value="">{loadingUsers ? "Đang tải danh sách..." : "-- Tự động assign cho bạn --"}</option>
+                    {assignableUsers.map(u => (
+                      <option key={u.accountId || u.name} value={u.name || u.accountId}>
+                        {u.displayName} {u.name ? `(${u.name})` : ""}
+                      </option>
+                    ))}
+                  </select>
                   <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                    Dùng để tìm task cuối cùng của người này và tự động gán ngày bắt đầu.
+                    Dùng để tìm task cuối cùng của người này và tự động điền Assignee cho từng task sinh ra.
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>Phân tích theo Role (Tùy chọn)</label>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 4 }}>
+                    {ROLES.map((r) => (
+                      <label key={r} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", fontWeight: "normal" }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedRoles.includes(r)}
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedRoles([...selectedRoles, r]);
+                            else setSelectedRoles(selectedRoles.filter(role => role !== r));
+                          }}
+                          disabled={isAnalyzing}
+                          style={{ margin: 0 }}
+                        />
+                        {r}
+                      </label>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                    Nếu chọn, AI sẽ chỉ trích xuất các task thuộc về các vai trò này.
                   </div>
                 </div>
 
@@ -358,15 +404,33 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                         <div key={idx} style={{ display: "flex", gap: 8 }}>
                           <input
                             type="text"
-                            value={task}
+                            value={task.summary}
+                            placeholder="Tóm tắt công việc"
                             onChange={(e) => {
                               const newTasks = [...analyzedTasks];
-                              newTasks[idx] = e.target.value;
+                              newTasks[idx].summary = e.target.value;
                               setAnalyzedTasks(newTasks);
                             }}
                             style={{ flex: 1 }}
                             disabled={isRunning}
                           />
+                          <select
+                            value={task.assignee}
+                            onChange={(e) => {
+                              const newTasks = [...analyzedTasks];
+                              newTasks[idx].assignee = e.target.value;
+                              setAnalyzedTasks(newTasks);
+                            }}
+                            style={{ width: "160px" }}
+                            disabled={isRunning || loadingUsers}
+                          >
+                            <option value="">-- Assign cho bạn --</option>
+                            {assignableUsers.map(u => (
+                              <option key={u.accountId || u.name} value={u.name || u.accountId}>
+                                {u.displayName}
+                              </option>
+                            ))}
+                          </select>
                           <button
                             type="button"
                             className="btn btn-secondary"
@@ -384,7 +448,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
-                        onClick={() => setAnalyzedTasks([...analyzedTasks, ""])}
+                        onClick={() => setAnalyzedTasks([...analyzedTasks, { summary: "", assignee: assignee.trim() }])}
                         disabled={isRunning}
                         style={{ alignSelf: "flex-start", marginTop: 4 }}
                       >
@@ -429,7 +493,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                       type="button"
                       className="btn btn-primary"
                       onClick={() => handleBulkCreate(null, analyzedTasks)}
-                      disabled={isRunning || analyzedTasks.filter(t => t.trim()).length === 0}
+                      disabled={isRunning || analyzedTasks.filter(t => t.summary.trim()).length === 0}
                       style={{ width: "100%", padding: "12px", marginTop: 8 }}
                     >
                       {isRunning ? (
@@ -476,14 +540,19 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
               </div>
 
               <div className="form-group">
-                <label>Tài khoản Assignee (Username)</label>
-                <input
-                  type="text"
-                  placeholder="Ví dụ: namha (Để trống sẽ tự động assign cho bạn)"
+                <label>Tài khoản Assignee</label>
+                <select
                   value={assignee}
                   onChange={(e) => setAssignee(e.target.value)}
-                  disabled={isRunning}
-                />
+                  disabled={isRunning || loadingUsers}
+                >
+                  <option value="">{loadingUsers ? "Đang tải danh sách..." : "-- Tự động assign cho bạn --"}</option>
+                  {assignableUsers.map(u => (
+                    <option key={u.accountId || u.name} value={u.name || u.accountId}>
+                      {u.displayName} {u.name ? `(${u.name})` : ""}
+                    </option>
+                  ))}
+                </select>
                 <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
                   Nếu để trống, ứng dụng sẽ gọi API <code>/myself</code> để lấy tên tài khoản của bạn và tự động gắn vào.
                 </div>
