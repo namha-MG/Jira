@@ -71,6 +71,7 @@ export type JiraIssue = {
     issuetype: { name: string; iconUrl: string };
     description?: string;
     customfield_10300?: string;
+    customfield_10302?: string;
   };
 };
 
@@ -177,7 +178,7 @@ export async function getMyIssues(options: {
     params: {
       jql,
       maxResults,
-      fields: "summary,status,priority,assignee,timetracking,worklog,created,updated,duedate,project,issuetype,customfield_10300",
+      fields: "summary,status,priority,assignee,timetracking,worklog,created,updated,duedate,project,issuetype,customfield_10300,customfield_10302",
     },
   });
 
@@ -393,4 +394,33 @@ export async function transitionIssue(issueKey: string, transitionId: string): P
   await jiraApi.post(`/issue/${issueKey}/transitions`, {
     transition: { id: transitionId },
   });
+}
+
+/** Tìm ngày bắt đầu tiếp theo dựa trên task cuối cùng đã tạo/được gán */
+export async function getLatestTaskDate(projectKeys: string[], assignee?: string): Promise<Date | null> {
+  try {
+    const res = await getMyIssues({ projectKeys, maxResults: 50, assignee });
+    if (!res.issues || res.issues.length === 0) return null;
+
+    let maxDate = new Date(0);
+    let found = false;
+
+    for (const issue of res.issues) {
+      // Ưu tiên customfield_10302 (End Date) hoặc customfield_10300 (Start Date) hoặc created
+      const dateStr = issue.fields.customfield_10302 || issue.fields.customfield_10300 || issue.fields.created;
+      if (dateStr) {
+        const d = new Date(dateStr);
+        if (d > maxDate) {
+          maxDate = d;
+          found = true;
+        }
+      }
+    }
+
+    if (!found) return null;
+    return maxDate;
+  } catch (err) {
+    console.warn("Failed to get latest task date", err);
+    return null;
+  }
 }

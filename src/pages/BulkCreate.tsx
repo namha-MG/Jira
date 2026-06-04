@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { createIssue, addWorklog, JiraIssue } from "../jiraService";
+import { createIssue, addWorklog, JiraIssue, getLatestTaskDate } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
 interface CreationLog {
@@ -22,6 +22,11 @@ export default function BulkCreate() {
   });
   const [logs, setLogs] = useState<CreationLog[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  
+  const [creationMode, setCreationMode] = useState<"manual" | "ai">("manual");
+  const [aiContext, setAiContext] = useState("");
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analyzedTasks, setAnalyzedTasks] = useState<string[]>([]);
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
 
@@ -40,14 +45,15 @@ export default function BulkCreate() {
     return getNextWorkday(d);
   };
 
-  const handleBulkCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!bulkText.trim()) return;
-
-    const summaries = bulkText
-      .split("\n")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+  const handleBulkCreate = async (e: React.FormEvent | null, tasksToCreate?: string[]) => {
+    if (e) e.preventDefault();
+    
+    const summaries = tasksToCreate 
+      ? tasksToCreate.map((s) => s.trim()).filter((s) => s.length > 0)
+      : bulkText
+          .split("\n")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
 
     if (summaries.length === 0) return;
 
@@ -178,7 +184,62 @@ export default function BulkCreate() {
       }
     }
     setIsRunning(false);
-    setBulkText(""); // Clear form sau khi hoàn thành
+    if (!tasksToCreate) {
+      setBulkText("");
+    } else {
+      setAnalyzedTasks([]);
+      setAiContext("");
+    }
+  };
+
+  const handleAnalyzeContext = async () => {
+    if (!aiContext.trim()) return;
+
+    const geminiKey = localStorage.getItem("gemini_api_key");
+    if (!geminiKey) {
+      alert("Vui lòng cấu hình Google Gemini API Key trong phần Cài đặt trước.");
+      return;
+    }
+
+    setIsAnalyzing(true);
+    try {
+      const prompt = `Bạn là một trợ lý ảo phân tích công việc. Tôi sẽ cung cấp một đoạn văn bản mô tả các công việc đã làm. Hãy phân tích và trích xuất ra một danh sách các đầu việc nhỏ (task).
+Mỗi đầu việc phải ngắn gọn, súc tích, bắt đầu bằng động từ hành động (ví dụ: Viết API..., Thiết kế..., Sửa lỗi...).
+Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 1 dòng, không có dấu gạch đầu dòng, không đánh số thứ tự, không có tiêu đề, không markdown.
+Đoạn văn bản: "${aiContext}"`;
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      });
+
+      if (!response.ok) {
+        throw new Error("Lỗi kết nối API AI");
+      }
+
+      const data = await response.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+      
+      if (text) {
+        // Tách dòng và loại bỏ dấu gạch ngang đầu dòng (nếu có)
+        const tasks = text.split("\n").map(t => t.replace(/^[-*]\s*/, '').trim()).filter(t => t.length > 0);
+        setAnalyzedTasks(tasks);
+        
+        // Tìm ngày task cuối cùng
+        const latestDate = await getLatestTaskDate([selectedProject], assignee.trim() || undefined);
+        if (latestDate) {
+          const nextDay = advanceDay(latestDate);
+          setStartDate(nextDay.toISOString().slice(0, 10));
+        }
+      } else {
+        alert("Không nhận được kết quả hợp lệ từ AI.");
+      }
+    } catch (e: any) {
+      alert("Lỗi khi phân tích AI: " + e.message);
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   if (!isConfigured) {
@@ -214,10 +275,178 @@ export default function BulkCreate() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, alignItems: "start" }}>
           {/* Cột 1: Nhập liệu */}
           <div className="settings-section">
-            <div className="settings-section-title">➕ Tạo hàng loạt Issue</div>
-            <div className="settings-section-desc">Mỗi dòng văn bản bên dưới sẽ được tạo thành một Issue riêng biệt.</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+              <button
+                className={`btn btn-sm ${creationMode === "manual" ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setCreationMode("manual")}
+              >
+                📝 Nhập thủ công
+              </button>
+              <button
+                className={`btn btn-sm ${creationMode === "ai" ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setCreationMode("ai")}
+              >
+                ✨ Tạo bằng AI Context
+              </button>
+            </div>
 
-            <form onSubmit={handleBulkCreate}>
+            {creationMode === "ai" ? (
+              <div>
+                <div className="settings-section-title">✨ Phân tích công việc bằng AI</div>
+                <div className="settings-section-desc">Nhập mô tả các công việc bạn đã làm, AI sẽ tự động chia nhỏ thành các task và tự động tính toán ngày bắt đầu dựa trên task cuối cùng của bạn.</div>
+                
+                <div className="form-group" style={{ marginTop: 16 }}>
+                  <label>Dự án (Project)</label>
+                  <select
+                    value={selectedProject}
+                    onChange={(e) => setSelectedProject(e.target.value)}
+                    disabled={isAnalyzing}
+                  >
+                    {JIRA_PROJECTS.map((p) => (
+                      <option key={p.key} value={p.key}>
+                        {p.name} ({p.key})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>Tài khoản Assignee (Username)</label>
+                  <input
+                    type="text"
+                    placeholder="Ví dụ: namha (Để trống sẽ tự động assign cho bạn)"
+                    value={assignee}
+                    onChange={(e) => setAssignee(e.target.value)}
+                    disabled={isAnalyzing}
+                  />
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                    Dùng để tìm task cuối cùng của người này và tự động gán ngày bắt đầu.
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>Nội dung mô tả công việc (Context)</label>
+                  <textarea
+                    placeholder="Ví dụ: Tuần này tôi đã code xong API đăng nhập, sau đó tôi thiết kế lại database cho bảng Users, tiếp theo tôi fix bug lỗi hiển thị trên trang chủ..."
+                    value={aiContext}
+                    onChange={(e) => setAiContext(e.target.value)}
+                    disabled={isAnalyzing}
+                    rows={8}
+                    style={{ fontFamily: "inherit", lineHeight: "1.5" }}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleAnalyzeContext}
+                  disabled={isAnalyzing || !aiContext.trim()}
+                  style={{ width: "100%", padding: "12px", marginTop: 8 }}
+                >
+                  {isAnalyzing ? (
+                    <><span className="spinning">⏳</span> Đang phân tích...</>
+                  ) : (
+                    <>✨ Phân tích {analyzedTasks.length > 0 ? "lại" : "công việc"}</>
+                  )}
+                </button>
+
+                {analyzedTasks.length > 0 && (
+                  <div style={{ marginTop: 24, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
+                    <div className="settings-section-title" style={{ marginBottom: 12 }}>📝 Danh sách Task (Có thể chỉnh sửa)</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+                      {analyzedTasks.map((task, idx) => (
+                        <div key={idx} style={{ display: "flex", gap: 8 }}>
+                          <input
+                            type="text"
+                            value={task}
+                            onChange={(e) => {
+                              const newTasks = [...analyzedTasks];
+                              newTasks[idx] = e.target.value;
+                              setAnalyzedTasks(newTasks);
+                            }}
+                            style={{ flex: 1 }}
+                            disabled={isRunning}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={() => {
+                              const newTasks = analyzedTasks.filter((_, i) => i !== idx);
+                              setAnalyzedTasks(newTasks);
+                            }}
+                            disabled={isRunning}
+                            style={{ padding: "0 12px" }}
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setAnalyzedTasks([...analyzedTasks, ""])}
+                        disabled={isRunning}
+                        style={{ alignSelf: "flex-start", marginTop: 4 }}
+                      >
+                        ➕ Thêm Task
+                      </button>
+                    </div>
+
+                    <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
+                      <input
+                        id="checkbox-autolog-ai"
+                        type="checkbox"
+                        checked={autoLogWork}
+                        onChange={(e) => setAutoLogWork(e.target.checked)}
+                        disabled={isRunning}
+                        style={{ width: "auto", margin: 0, cursor: "pointer" }}
+                      />
+                      <label htmlFor="checkbox-autolog-ai" style={{ cursor: "pointer", fontWeight: "normal", fontSize: 13, userSelect: "none" }}>
+                        Tự động log work 7h cho mỗi issue sau khi tạo?
+                      </label>
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="input-start-date-log-ai">
+                        {autoLogWork ? "Ngày bắt đầu log work *" : "Ngày bắt đầu của Task *"}
+                      </label>
+                      <input
+                        id="input-start-date-log-ai"
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        disabled={isRunning}
+                        required
+                      />
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                        {autoLogWork 
+                          ? "Mỗi task sẽ tự động được gán Start/End Date và log 7h trên 1 ngày kế tiếp (bỏ qua Thứ Bảy và Chủ Nhật)."
+                          : "Mỗi task sẽ tự động được gán Start/End Date trên 1 ngày kế tiếp (bỏ qua Thứ Bảy và Chủ Nhật) nhưng KHÔNG thực hiện log work."}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => handleBulkCreate(null, analyzedTasks)}
+                      disabled={isRunning || analyzedTasks.filter(t => t.trim()).length === 0}
+                      style={{ width: "100%", padding: "12px", marginTop: 8 }}
+                    >
+                      {isRunning ? (
+                        <><span className="spinning">🌀</span> Đang xử lý tự động...</>
+                      ) : (
+                        <>🚀 Bắt đầu Tạo Issues</>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="settings-section-title">➕ Tạo hàng loạt Issue</div>
+                <div className="settings-section-desc">Mỗi dòng văn bản bên dưới sẽ được tạo thành một Issue riêng biệt.</div>
+
+                <form onSubmit={handleBulkCreate}>
               <div className="form-group">
                 <label>Dự án (Project)</label>
                 <select
@@ -319,6 +548,8 @@ export default function BulkCreate() {
                 )}
               </button>
             </form>
+            </>
+            )}
           </div>
 
           {/* Cột 2: Trạng thái & Tiến độ */}

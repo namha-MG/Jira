@@ -7,6 +7,16 @@ interface Toast { id: number; type: "success" | "error"; msg: string; }
 export default function LogWork() {
   const [issueKeysText, setIssueKeysText] = useState("");
   const [timeSpent, setTimeSpent] = useState("7h");
+  const [logDate, setLogDate] = useState(() => {
+    const now = new Date();
+    return now.toISOString().slice(0, 10);
+  });
+  const [logTime, setLogTime] = useState("08:00");
+
+  const currentTasksCount = issueKeysText
+    .split(/[\n, ]+/)
+    .map(k => k.trim())
+    .filter(k => k.length > 0).length;
   const [comment, setComment] = useState("");
   const [adjustEstimate, setAdjustEstimate] = useState<"auto" | "leave" | "manual" | "new">("auto");
   const [submitting, setSubmitting] = useState(false);
@@ -210,7 +220,23 @@ export default function LogWork() {
         }
 
         let started: string;
-        if (issueObj && issueObj.fields && issueObj.fields.customfield_10300) {
+        if (keysToLog.length === 1 && logDate && logTime) {
+           const [h, min] = logTime.split(':').map(Number);
+           const [y, m, d] = logDate.split('-').map(Number);
+           
+           const dateObj = new Date(y, m - 1, d, isNaN(h) ? 8 : h, isNaN(min) ? 0 : min, 0);
+           const offset = -dateObj.getTimezoneOffset();
+           const sign = offset >= 0 ? "+" : "-";
+           const offsetHours = String(Math.floor(Math.abs(offset) / 60)).padStart(2, "0");
+           const offsetMins = String(Math.abs(offset) % 60).padStart(2, "0");
+           const yyyy = dateObj.getFullYear();
+           const mm = String(dateObj.getMonth() + 1).padStart(2, "0");
+           const dd = String(dateObj.getDate()).padStart(2, "0");
+           const hh = String(dateObj.getHours()).padStart(2, "0");
+           const mmm = String(dateObj.getMinutes()).padStart(2, "0");
+
+           started = `${yyyy}-${mm}-${dd}T${hh}:${mmm}:00.000${sign}${offsetHours}${offsetMins}`;
+        } else if (issueObj && issueObj.fields && issueObj.fields.customfield_10300) {
            started = issueObj.fields.customfield_10300;
         } else {
            // Fallback: 8:00 AM hôm nay nếu task không có Start Date
@@ -421,6 +447,33 @@ export default function LogWork() {
                     Projects: {JIRA_PROJECTS.map((p) => p.key).join(", ")}
                   </div>
                 </div>
+
+                {currentTasksCount === 1 && (
+                  <div className="form-group">
+                    <label>Ngày giờ bắt đầu Log Work</label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input
+                        type="date"
+                        value={logDate}
+                        onChange={(e) => setLogDate(e.target.value)}
+                        disabled={submitting}
+                        required
+                        style={{ flex: 1 }}
+                      />
+                      <input
+                        type="time"
+                        value={logTime}
+                        onChange={(e) => setLogTime(e.target.value)}
+                        disabled={submitting}
+                        required
+                        style={{ width: "auto" }}
+                      />
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                      Sẽ sử dụng ngày giờ này để log thay vì tự động lấy từ Start Date của Task.
+                    </div>
+                  </div>
+                )}
 
                 <div className="form-group">
                   <label htmlFor="input-time-spent">Thời gian *</label>
