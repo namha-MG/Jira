@@ -3,12 +3,34 @@ import cors from "cors";
 import { Client } from "pg";
 import dotenv from "dotenv";
 import path from "path";
+import { createProxyMiddleware } from "http-proxy-middleware";
 import { startCronJobs } from "./cron";
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
+
+// Giả lập lại proxy của Vite / Nginx cho Frontend gọi Jira API
+app.use(
+  "/jira-api",
+  createProxyMiddleware({
+    target: "https://20.84.97.109:3033",
+    changeOrigin: true,
+    secure: false, // Bỏ qua SSL verify
+    pathRewrite: {
+      "^/jira-api": "", // Cắt tiền tố /jira-api
+    },
+    on: {
+      proxyReq: (proxyReq) => {
+        // Ghi đè Origin và Referer để vượt lỗi 403 CSRF của Jira Server
+        proxyReq.setHeader("Origin", "https://20.84.97.109:3033");
+        proxyReq.setHeader("Referer", "https://20.84.97.109:3033/");
+      },
+    },
+  })
+);
+
 app.use(express.json());
 
 const { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } = process.env;
