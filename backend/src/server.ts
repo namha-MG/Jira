@@ -47,7 +47,7 @@ app.get("/api/health", (req, res) => {
 app.use(express.static(path.join(process.cwd(), "public")));
 
 // Catch-all route to serve React app
-app.get("*", (req, res) => {
+app.get(/.*/, (req, res) => {
   res.sendFile(path.join(process.cwd(), "public/index.html"));
 });
 
