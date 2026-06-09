@@ -8,7 +8,7 @@ dotenv.config();
 const { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } = process.env;
 const POSTGRES_URL = `postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}`;
 
-async function processUser(pat: string, client: Client, runType: string = "CRON") {
+async function processUser(pat: string, client: Client, runType: string = "CRON", geminiKey?: string) {
   let runId: number | null = null;
   
   try {
@@ -67,12 +67,31 @@ async function processUser(pat: string, client: Client, runType: string = "CRON"
         }
 
         if (toLog > 0) {
+          let logComment = "Tự động log work khi đến Due Date";
+          if (geminiKey) {
+            try {
+              const prompt = `Bạn là một kỹ sư phần mềm. Hãy viết một câu ngắn gọn, tự nhiên, bằng tiếng Việt (dưới 15 từ) để làm nội dung log work cho công việc có tiêu đề: "${issue.fields.summary}". Ví dụ: "Đã hoàn thành tối ưu hóa", "Xử lý xong lỗi hiển thị". Chỉ trả về nội dung câu log, không có dấu ngoặc kép hay giải thích thừa.`;
+              const aiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+              });
+              if (aiRes.ok) {
+                const data = await aiRes.json();
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+                if (text) logComment = text;
+              }
+            } catch (e) {
+              console.warn("AI generation failed for auto log work, fallback to default", e);
+            }
+          }
+
           try {
-            await addWorklog(api, issue.key, toLog, "Tự động log work khi đến Due Date");
-            console.log(`[Auto] Logged ${toLog}s for ${issue.key}`);
+            await addWorklog(api, issue.key, toLog, logComment);
+            console.log(`[Auto] Logged ${toLog}s for ${issue.key} with comment: ${logComment}`);
             await client.query(
               `INSERT INTO job_task_logs (job_run_id, issue_key, action_type, status, message) VALUES ($1, $2, $3, $4, $5)`,
-              [runId, issue.key, 'LOG_WORK', 'SUCCESS', `Logged ${toLog}s`]
+              [runId, issue.key, 'LOG_WORK', 'SUCCESS', `Logged ${toLog}s: ${logComment}`]
             );
           } catch (e: any) {
             const errLog = e?.response?.data || e.message;
@@ -166,15 +185,16 @@ export function startCronJobs() {
     const client = new Client({ connectionString: POSTGRES_URL });
     try {
       await client.connect();
-      const res = await client.query("SELECT value FROM jira_app_configs WHERE key = 'jira_pat'");
-      if (res.rows.length > 0) {
-        const pat = res.rows[0].value;
-        await processUser(pat, client, "CRON");
+      const res = await client.query("SELECT key, value FROM jira_app_configs WHERE key IN ('jira_pat', 'gemini_api_key')");
+      const configMap: any = res.rows.reduce((acc: any, row) => ({ ...acc, [row.key]: row.value }), {});
+      
+      if (configMap.jira_pat) {
+        await processUser(configMap.jira_pat, client, "CRON", configMap.gemini_api_key);
       } else {
         console.log("No Jira PAT found in database. Skipping execution.");
       }
     } catch (err) {
-      console.error("Error fetching PAT from DB:", err);
+      console.error("Error fetching configs from DB:", err);
     } finally {
       await client.end();
     }
@@ -186,10 +206,11 @@ export async function triggerManualJob() {
   const client = new Client({ connectionString: POSTGRES_URL });
   try {
     await client.connect();
-    const res = await client.query("SELECT value FROM jira_app_configs WHERE key = 'jira_pat'");
-    if (res.rows.length > 0) {
-      const pat = res.rows[0].value;
-      await processUser(pat, client, "MANUAL");
+    const res = await client.query("SELECT key, value FROM jira_app_configs WHERE key IN ('jira_pat', 'gemini_api_key')");
+    const configMap: any = res.rows.reduce((acc: any, row) => ({ ...acc, [row.key]: row.value }), {});
+      
+    if (configMap.jira_pat) {
+      await processUser(configMap.jira_pat, client, "MANUAL", configMap.gemini_api_key);
     } else {
       throw new Error("No Jira PAT configured in database");
     }
