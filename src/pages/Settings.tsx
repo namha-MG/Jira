@@ -64,6 +64,20 @@ export default function Settings() {
 
     // Test connection
     await testConn();
+    
+    // Save PAT to backend for cron jobs
+    if (pat.trim()) {
+      try {
+        await fetch("http://localhost:3001/api/save-token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pat: pat.trim() })
+        });
+      } catch (e) {
+        console.warn("Failed to sync PAT to backend", e);
+      }
+    }
+
     addToast("success", "✅ Đã lưu cài đặt");
     setSaving(false);
   };
