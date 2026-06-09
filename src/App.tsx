@@ -8,6 +8,7 @@ import Issues from "./pages/Issues";
 import LogWork from "./pages/LogWork";
 import Settings from "./pages/Settings";
 import BulkCreate from "./pages/BulkCreate";
+import JobLogs from "./pages/JobLogs";
 
 export default function App() {
   const isAuthenticated = useIsAuthenticated();
@@ -42,6 +43,7 @@ export default function App() {
       case "issues":      return <Issues />;
       case "logwork":     return <LogWork />;
       case "bulkcreate":  return <BulkCreate />;
+      case "joblogs":     return <JobLogs />;
       case "settings":    return <Settings />;
       default:            return <Dashboard />;
     }

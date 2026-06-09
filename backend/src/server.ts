@@ -4,7 +4,7 @@ import { Client } from "pg";
 import dotenv from "dotenv";
 import path from "path";
 import { createProxyMiddleware } from "http-proxy-middleware";
-import { startCronJobs } from "./cron";
+import { startCronJobs, triggerManualJob } from "./cron";
 
 dotenv.config();
 
@@ -63,6 +63,46 @@ app.post("/api/save-token", async (req, res) => {
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
+});
+
+// JOB MONITOR APIs
+app.get("/api/jobs", async (req, res) => {
+  const client = new Client({ connectionString: POSTGRES_URL });
+  try {
+    await client.connect();
+    const dbRes = await client.query("SELECT * FROM job_runs ORDER BY started_at DESC LIMIT 50");
+    res.json(dbRes.rows);
+  } catch (err) {
+    console.error("Error fetching jobs:", err);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    await client.end();
+  }
+});
+
+app.get("/api/jobs/:id/tasks", async (req, res) => {
+  const client = new Client({ connectionString: POSTGRES_URL });
+  try {
+    await client.connect();
+    const dbRes = await client.query("SELECT * FROM job_task_logs WHERE job_run_id = $1 ORDER BY created_at ASC", [req.params.id]);
+    res.json(dbRes.rows);
+  } catch (err) {
+    console.error("Error fetching job tasks:", err);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    await client.end();
+  }
+});
+
+app.post("/api/jobs/trigger", async (req, res) => {
+  try {
+    // Run in background so it doesn't block request
+    triggerManualJob().catch(err => console.error("Manual job failed:", err));
+    res.json({ success: true, message: "Job started in background" });
+  } catch (err) {
+    console.error("Error triggering job:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // Serve frontend static files

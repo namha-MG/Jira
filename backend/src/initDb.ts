@@ -42,7 +42,27 @@ async function init() {
         key VARCHAR(255) UNIQUE NOT NULL,
         value TEXT NOT NULL,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
+      );
+
+      CREATE TABLE IF NOT EXISTS job_runs (
+        id SERIAL PRIMARY KEY,
+        run_type VARCHAR(50) NOT NULL,
+        status VARCHAR(50) NOT NULL,
+        started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP,
+        tasks_processed INT DEFAULT 0,
+        error_message TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS job_task_logs (
+        id SERIAL PRIMARY KEY,
+        job_run_id INT REFERENCES job_runs(id) ON DELETE CASCADE,
+        issue_key VARCHAR(50) NOT NULL,
+        action_type VARCHAR(100) NOT NULL,
+        status VARCHAR(50) NOT NULL,
+        message TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
     `;
     await appClient.query(createTableQuery);
     console.log("Table jira_app_configs created/verified.");

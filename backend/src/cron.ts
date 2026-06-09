@@ -8,8 +8,16 @@ dotenv.config();
 const { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } = process.env;
 const POSTGRES_URL = `postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}`;
 
-async function processUser(pat: string) {
+async function processUser(pat: string, client: Client, runType: string = "CRON") {
+  let runId: number | null = null;
+  
   try {
+    const runRes = await client.query(
+      `INSERT INTO job_runs (run_type, status) VALUES ($1, 'RUNNING') RETURNING id`,
+      [runType]
+    );
+    runId = runRes.rows[0].id;
+
     const api = getJiraApi(pat);
     // Hardcode the project keys for now, or read from somewhere
     const projectKeys = ["BXDCSDL", "VH"]; 
@@ -63,8 +71,17 @@ async function processUser(pat: string) {
           try {
             await addWorklog(api, issue.key, toLog, "Tự động log work khi đến Due Date");
             console.log(`[Auto] Logged ${toLog}s for ${issue.key}`);
+            await client.query(
+              `INSERT INTO job_task_logs (job_run_id, issue_key, action_type, status, message) VALUES ($1, $2, $3, $4, $5)`,
+              [runId, issue.key, 'LOG_WORK', 'SUCCESS', `Logged ${toLog}s`]
+            );
           } catch (e: any) {
-            console.warn(`[Auto] Failed to auto-log for ${issue.key}`, e?.response?.data || e.message);
+            const errLog = e?.response?.data || e.message;
+            console.warn(`[Auto] Failed to auto-log for ${issue.key}`, errLog);
+            await client.query(
+              `INSERT INTO job_task_logs (job_run_id, issue_key, action_type, status, message) VALUES ($1, $2, $3, $4, $5)`,
+              [runId, issue.key, 'LOG_WORK', 'FAILED', JSON.stringify(errLog)]
+            );
           }
         }
 
@@ -79,9 +96,18 @@ async function processUser(pat: string) {
             await transitionIssue(api, issue.key, toClosed.id);
             console.log(`[Auto] Closed ${issue.key}`);
             closedCount++;
+            await client.query(
+              `INSERT INTO job_task_logs (job_run_id, issue_key, action_type, status, message) VALUES ($1, $2, $3, $4, $5)`,
+              [runId, issue.key, 'TRANSITION_CLOSED', 'SUCCESS', `Transitioned to ${toClosed.name}`]
+            );
           }
         } catch (e: any) {
-          console.warn(`[Auto] Failed to auto-close ${issue.key}`, e?.response?.data || e.message);
+          const errLog = e?.response?.data || e.message;
+          console.warn(`[Auto] Failed to auto-close ${issue.key}`, errLog);
+          await client.query(
+            `INSERT INTO job_task_logs (job_run_id, issue_key, action_type, status, message) VALUES ($1, $2, $3, $4, $5)`,
+            [runId, issue.key, 'TRANSITION_CLOSED', 'FAILED', JSON.stringify(errLog)]
+          );
         }
       } 
       // Rule 1: Start Date <= Today and is To Do -> Move to In Progress
@@ -97,15 +123,38 @@ async function processUser(pat: string) {
             await transitionIssue(api, issue.key, toInProgress.id);
             console.log(`[Auto] Moved ${issue.key} to In Progress`);
             inProgressCount++;
+            await client.query(
+              `INSERT INTO job_task_logs (job_run_id, issue_key, action_type, status, message) VALUES ($1, $2, $3, $4, $5)`,
+              [runId, issue.key, 'TRANSITION_IN_PROGRESS', 'SUCCESS', `Transitioned to ${toInProgress.name}`]
+            );
           }
         } catch (e: any) {
-          console.warn(`[Auto] Failed to move ${issue.key} to In Progress`, e?.response?.data || e.message);
+          const errLog = e?.response?.data || e.message;
+          console.warn(`[Auto] Failed to move ${issue.key} to In Progress`, errLog);
+          await client.query(
+            `INSERT INTO job_task_logs (job_run_id, issue_key, action_type, status, message) VALUES ($1, $2, $3, $4, $5)`,
+            [runId, issue.key, 'TRANSITION_IN_PROGRESS', 'FAILED', JSON.stringify(errLog)]
+          );
         }
       }
     }
     console.log(`[AutoProcess completed] InProgress: ${inProgressCount}, Closed: ${closedCount}`);
+    
+    if (runId) {
+      await client.query(
+        `UPDATE job_runs SET status = 'SUCCESS', completed_at = CURRENT_TIMESTAMP, tasks_processed = $1 WHERE id = $2`,
+        [inProgressCount + closedCount, runId]
+      );
+    }
   } catch (err: any) {
-    console.error("Auto process user failed", err?.response?.data || err.message);
+    const errorMsg = JSON.stringify(err?.response?.data || err.message);
+    console.error("Auto process user failed", errorMsg);
+    if (runId) {
+      await client.query(
+        `UPDATE job_runs SET status = 'FAILED', completed_at = CURRENT_TIMESTAMP, error_message = $1 WHERE id = $2`,
+        [errorMsg, runId]
+      );
+    }
   }
 }
 
@@ -121,7 +170,7 @@ export function startCronJobs() {
       const res = await client.query("SELECT value FROM jira_app_configs WHERE key = 'jira_pat'");
       if (res.rows.length > 0) {
         const pat = res.rows[0].value;
-        await processUser(pat);
+        await processUser(pat, client, "CRON");
       } else {
         console.log("No Jira PAT found in database. Skipping execution.");
       }
@@ -131,4 +180,21 @@ export function startCronJobs() {
       await client.end();
     }
   });
+}
+
+export async function triggerManualJob() {
+  console.log("Manually triggering auto-process task...");
+  const client = new Client({ connectionString: POSTGRES_URL });
+  try {
+    await client.connect();
+    const res = await client.query("SELECT value FROM jira_app_configs WHERE key = 'jira_pat'");
+    if (res.rows.length > 0) {
+      const pat = res.rows[0].value;
+      await processUser(pat, client, "MANUAL");
+    } else {
+      throw new Error("No Jira PAT configured in database");
+    }
+  } finally {
+    await client.end();
+  }
 }
