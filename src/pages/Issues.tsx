@@ -30,8 +30,9 @@ export default function Issues() {
   const [worklogs, setWorklogs] = useState<JiraWorklog[]>([]);
   const [worklogLoading, setWorklogLoading] = useState(false);
   const [timeRange, setTimeRange] = useState<"month" | "all">("month");
-  const [sortBy, setSortBy] = useState<"key" | "updated" | "logged" | "estimate">("updated");
+  const [sortBy, setSortBy] = useState<"key" | "updated" | "logged" | "estimate" | "startDate">("updated");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [advancedFilter, setAdvancedFilter] = useState("all");
 
   useEffect(() => {
     setStatusFilter("all");
@@ -107,7 +108,30 @@ export default function Issues() {
         (assigneeFilter === "unassigned" && !i.fields.assignee) ||
         (i.fields.assignee && (i.fields.assignee.name || i.fields.assignee.accountId || i.fields.assignee.emailAddress) === assigneeFilter);
 
-      return matchText && matchStatus && matchTime && matchAssignee;
+      let matchAdvanced = true;
+      if (advancedFilter !== "all") {
+        const statusName = i.fields.status.name.toLowerCase();
+        const isDone = statusName === "done" || statusName === "resolved" || statusName === "closed" || statusName === "hoàn thành" || statusName === "đã giải quyết";
+        const log = i.fields.timetracking?.timeSpentSeconds || 0;
+        const dueDateStr = i.fields.duedate || i.fields.customfield_10302;
+        let isOverdue = false;
+        if (dueDateStr && !isDone) {
+           const dueDate = new Date(dueDateStr);
+           const today = new Date();
+           today.setHours(0,0,0,0);
+           isOverdue = dueDate < today;
+        }
+
+        if (advancedFilter === "overdue-unlogged") {
+           matchAdvanced = isOverdue && log === 0;
+        } else if (advancedFilter === "overdue") {
+           matchAdvanced = isOverdue;
+        } else if (advancedFilter === "unlogged") {
+           matchAdvanced = !isDone && log === 0;
+        }
+      }
+
+      return matchText && matchStatus && matchTime && matchAssignee && matchAdvanced;
     })
     .sort((a, b) => {
       let va = 0, vb = 0;
@@ -129,6 +153,9 @@ export default function Issues() {
       } else if (sortBy === "estimate") {
         va = a.fields.timetracking?.originalEstimateSeconds || 0;
         vb = b.fields.timetracking?.originalEstimateSeconds || 0;
+      } else if (sortBy === "startDate") {
+        va = a.fields.customfield_10300 ? new Date(a.fields.customfield_10300).getTime() : 0;
+        vb = b.fields.customfield_10300 ? new Date(b.fields.customfield_10300).getTime() : 0;
       }
       return sortDir === "asc" ? va - vb : vb - va;
     });
@@ -257,6 +284,17 @@ export default function Issues() {
                 );
               })}
             </select>
+            <select
+              id="select-advanced-filter"
+              value={advancedFilter}
+              onChange={(e) => setAdvancedFilter(e.target.value)}
+              style={{ width: 160 }}
+            >
+              <option value="all">Tất cả tình trạng</option>
+              <option value="overdue-unlogged">Quá hạn chưa log work</option>
+              <option value="overdue">Quá hạn</option>
+              <option value="unlogged">Chưa log work</option>
+            </select>
           </div>
         </div>
 
@@ -274,6 +312,7 @@ export default function Issues() {
                 <th>Người xử lý</th>
                 <th>Trạng thái</th>
                 <th>Loại</th>
+                <th onClick={() => handleSort("startDate")} style={{ cursor: "pointer" }}>Start Date{sortIndicator("startDate")}</th>
                 <th onClick={() => handleSort("estimate")} style={{ cursor: "pointer" }}>Estimate{sortIndicator("estimate")}</th>
                 <th onClick={() => handleSort("logged")} style={{ cursor: "pointer" }}>Logged{sortIndicator("logged")}</th>
                 <th>Tiến độ</th>
@@ -285,7 +324,7 @@ export default function Issues() {
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={i}>
-                    {Array.from({ length: 9 }).map((__, j) => (
+                    {Array.from({ length: 10 }).map((__, j) => (
                       <td key={j}><div className="skeleton" style={{ height: 16, borderRadius: 4 }} /></td>
                     ))}
                   </tr>
@@ -306,6 +345,7 @@ export default function Issues() {
                   const log = issue.fields.timetracking?.timeSpentSeconds || 0;
                   const pct = est > 0 ? Math.round((log / est) * 100) : (log > 0 ? 100 : 0);
                   const updatedDate = new Date(issue.fields.updated).toLocaleDateString("vi-VN");
+                  const startDateStr = issue.fields.customfield_10300 ? new Date(issue.fields.customfield_10300).toLocaleDateString("vi-VN") : "—";
 
                   return (
                     <tr key={issue.id}>
@@ -348,6 +388,7 @@ export default function Issues() {
                       <td style={{ fontSize: 11, color: "var(--text-muted)" }}>
                         {issue.fields.issuetype?.name || "—"}
                       </td>
+                      <td style={{ fontSize: 11, color: "var(--text-primary)" }}>{startDateStr}</td>
                       <td style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 500 }}>
                         {est ? formatSeconds(est) : <span style={{ color: "var(--text-muted)" }}>—</span>}
                       </td>
