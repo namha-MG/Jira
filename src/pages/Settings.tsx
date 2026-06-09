@@ -68,7 +68,7 @@ export default function Settings() {
     // Save PAT to backend for cron jobs
     if (pat.trim()) {
       try {
-        await fetch("http://localhost:3001/api/save-token", {
+        await fetch("/api/save-token", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ pat: pat.trim() })

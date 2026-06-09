@@ -1,39 +1,33 @@
-# ==========================================
-# Stage 1: Build ứng dụng React với Node.js
-# ==========================================
-FROM node:20.14.0-alpine AS builder
-
-# Thiết lập thư mục làm việc
+# Stage 1: Build Frontend
+FROM node:20-alpine AS frontend-builder
 WORKDIR /app
-
-# Copy các file quản lý dependencies
 COPY package.json package-lock.json ./
-
-# Cài đặt dependencies
 RUN npm install
-
-# Copy toàn bộ mã nguồn vào container
 COPY . .
-
-# Build ứng dụng Vite cho production
 RUN npm run build
 
-# ==========================================
-# Stage 2: Serve ứng dụng với Nginx
-# ==========================================
-FROM nginx:alpine
+# Stage 2: Build Backend
+FROM node:20-alpine AS backend-builder
+WORKDIR /app/backend
+COPY backend/package.json backend/package-lock.json ./
+RUN npm install
+COPY backend .
+RUN npm run build
 
-# Xóa cấu hình Nginx mặc định
-RUN rm -rf /etc/nginx/conf.d/*
+# Stage 3: Final Production Image
+FROM node:20-alpine
+WORKDIR /app
 
-# Copy file cấu hình Nginx tùy chỉnh của chúng ta vào container
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy backend files and install production dependencies
+COPY --from=backend-builder /app/backend/package.json /app/backend/package-lock.json ./
+RUN npm install --production
+COPY --from=backend-builder /app/backend/dist ./dist
 
-# Copy thư mục build (dist) từ Stage 1 sang thư mục html của Nginx
-COPY --from=builder /app/dist /usr/share/nginx/html
+# Copy frontend build output into the public directory
+COPY --from=frontend-builder /app/dist ./public
 
-# Expose port 80 cho HTTP traffic
-EXPOSE 80
+# Environment Configuration
+ENV PORT=3001
+EXPOSE 3001
 
-# Chạy Nginx ở chế độ foreground
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "dist/server.js"]

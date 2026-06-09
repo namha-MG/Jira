@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import { Client } from "pg";
 import dotenv from "dotenv";
+import path from "path";
 import { startCronJobs } from "./cron";
 
 dotenv.config();
@@ -40,6 +41,14 @@ app.post("/api/save-token", async (req, res) => {
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
+});
+
+// Serve frontend static files
+app.use(express.static(path.join(process.cwd(), "public")));
+
+// Catch-all route to serve React app
+app.get("*", (req, res) => {
+  res.sendFile(path.join(process.cwd(), "public/index.html"));
 });
 
 const PORT = process.env.PORT || 3001;
