@@ -14,9 +14,12 @@ export function getJiraApi(pat: string) {
   });
 }
 
-export async function getMyIssues(api: any, projectKeys: string[]) {
-  const projectFilter = projectKeys.map((k) => `"${k}"`).join(", ");
-  const jql = `project in (${projectFilter}) AND assignee = currentUser() ORDER BY updated DESC`;
+export async function getMyIssues(api: any, projectKeys?: string[]) {
+  let jql = `assignee = currentUser() ORDER BY updated DESC`;
+  if (projectKeys && projectKeys.length > 0) {
+    const projectFilter = projectKeys.map((k) => `"${k}"`).join(", ");
+    jql = `project in (${projectFilter}) AND assignee = currentUser() ORDER BY updated DESC`;
+  }
 
   const res = await api.get("/search", {
     params: {

@@ -19,9 +19,8 @@ async function processUser(pat: string, client: Client, runType: string = "CRON"
     runId = runRes.rows[0].id;
 
     const api = getJiraApi(pat);
-    // Hardcode the project keys for now, or read from somewhere
-    const projectKeys = ["BXDCSDL", "VH"]; 
-    const result = await getMyIssues(api, projectKeys);
+    // Lấy tất cả task của user hiện tại thay vì hardcode project
+    const result = await getMyIssues(api, []);
     const issues = result.issues;
 
     const now = new Date();
