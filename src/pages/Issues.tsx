@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  getIssuesByProject, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask
+  getIssuesByProject, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
@@ -336,11 +336,34 @@ export default function Issues() {
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={11}>
                     <div className="empty-state" style={{ padding: 32 }}>
                       <div className="empty-state-icon">📭</div>
                       <div className="empty-state-title">Không có issues</div>
                       <p className="empty-state-text">Thử thay đổi bộ lọc hoặc project khác</p>
+                      {searchText.match(/^[A-Za-z]+-\d+$/) && (
+                        <button 
+                          className="btn btn-primary" 
+                          style={{ marginTop: 16 }}
+                          onClick={async () => {
+                            try {
+                              setLoading(true);
+                              const issue = await getIssue(searchText.toUpperCase());
+                              setIssues((prev) => {
+                                if (prev.find((i) => i.key === issue.key)) return prev;
+                                return [issue, ...prev];
+                              });
+                              setError(null);
+                            } catch (e: any) {
+                              setError("Không tìm thấy ticket trên máy chủ Jira hoặc bạn không có quyền xem.");
+                            } finally {
+                              setLoading(false);
+                            }
+                          }}
+                        >
+                          Tải dữ liệu "{searchText.toUpperCase()}" từ Jira
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -419,7 +442,7 @@ export default function Issues() {
                         >
                           Chi tiết
                         </button>
-                        {issue.fields.issuetype?.name === "Task" && (
+                        {(issue.fields.issuetype?.name === "Task" || issue.fields.issuetype?.name === "Story") && (
                           <button
                             className="btn btn-ghost btn-sm"
                             style={{ color: "var(--accent-blue)", marginLeft: 4 }}
