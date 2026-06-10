@@ -237,8 +237,9 @@ export default function Dashboard() {
         rangeEnd = endOfPrevMonth;
       }
 
+      const taskDateStr = issue.fields.customfield_10300 || issue.fields.duedate || issue.fields.customfield_10302;
       const periodLogs = issue.fields.worklog?.worklogs?.reduce((s, wl) => {
-        const wlDate = new Date(wl.started);
+        const wlDate = taskDateStr ? new Date(taskDateStr) : new Date(wl.started);
         return (wlDate >= rangeStart && wlDate <= rangeEnd) ? s + wl.timeSpentSeconds : s;
       }, 0) || 0;
       return sum + periodLogs;
@@ -271,8 +272,9 @@ export default function Dashboard() {
           rangeEnd = endOfPrevMonth;
         }
 
+        const taskDateStr = issue.fields.customfield_10300 || issue.fields.duedate || issue.fields.customfield_10302;
         const periodLogs = issue.fields.worklog?.worklogs?.reduce((s, wl) => {
-          const wlDate = new Date(wl.started);
+          const wlDate = taskDateStr ? new Date(taskDateStr) : new Date(wl.started);
           return (wlDate >= rangeStart && wlDate <= rangeEnd) ? s + wl.timeSpentSeconds : s;
         }, 0) || 0;
         return sum + periodLogs;
@@ -320,8 +322,9 @@ export default function Dashboard() {
   let lastWeekTotalSeconds = 0;
 
   issues.forEach((issue) => {
+    const taskDateStr = issue.fields.customfield_10300 || issue.fields.duedate || issue.fields.customfield_10302;
     issue.fields.worklog?.worklogs?.forEach((wl) => {
-      const wlDate = new Date(wl.started);
+      const wlDate = taskDateStr ? new Date(taskDateStr) : new Date(wl.started);
       const wlTime = wlDate.getTime();
 
       // Check last week

@@ -28,6 +28,7 @@ async function processUser(pat: string, client: Client, runType: string = "CRON"
 
     let inProgressCount = 0;
     let closedCount = 0;
+    const processedTasks = new Set<string>();
 
     for (const issue of issues) {
       const statusName = issue.fields.status?.name?.toLowerCase() || "";
@@ -89,6 +90,7 @@ async function processUser(pat: string, client: Client, runType: string = "CRON"
           try {
             await addWorklog(api, issue.key, toLog, logComment);
             console.log(`[Auto] Logged ${toLog}s for ${issue.key} with comment: ${logComment}`);
+            processedTasks.add(issue.key);
             await client.query(
               `INSERT INTO job_task_logs (job_run_id, issue_key, action_type, status, message) VALUES ($1, $2, $3, $4, $5)`,
               [runId, issue.key, 'LOG_WORK', 'SUCCESS', `Logged ${toLog}s: ${logComment}`]
@@ -114,6 +116,7 @@ async function processUser(pat: string, client: Client, runType: string = "CRON"
             await transitionIssue(api, issue.key, toClosed.id);
             console.log(`[Auto] Closed ${issue.key}`);
             closedCount++;
+            processedTasks.add(issue.key);
             await client.query(
               `INSERT INTO job_task_logs (job_run_id, issue_key, action_type, status, message) VALUES ($1, $2, $3, $4, $5)`,
               [runId, issue.key, 'TRANSITION_CLOSED', 'SUCCESS', `Transitioned to ${toClosed.name}`]
@@ -141,6 +144,7 @@ async function processUser(pat: string, client: Client, runType: string = "CRON"
             await transitionIssue(api, issue.key, toInProgress.id);
             console.log(`[Auto] Moved ${issue.key} to In Progress`);
             inProgressCount++;
+            processedTasks.add(issue.key);
             await client.query(
               `INSERT INTO job_task_logs (job_run_id, issue_key, action_type, status, message) VALUES ($1, $2, $3, $4, $5)`,
               [runId, issue.key, 'TRANSITION_IN_PROGRESS', 'SUCCESS', `Transitioned to ${toInProgress.name}`]
@@ -156,12 +160,12 @@ async function processUser(pat: string, client: Client, runType: string = "CRON"
         }
       }
     }
-    console.log(`[AutoProcess completed] InProgress: ${inProgressCount}, Closed: ${closedCount}`);
+    console.log(`[AutoProcess completed] Processed Unique Tasks: ${processedTasks.size} (InProgress: ${inProgressCount}, Closed: ${closedCount})`);
     
     if (runId) {
       await client.query(
         `UPDATE job_runs SET status = 'SUCCESS', completed_at = CURRENT_TIMESTAMP, tasks_processed = $1 WHERE id = $2`,
-        [inProgressCount + closedCount, runId]
+        [processedTasks.size, runId]
       );
     }
   } catch (err: any) {
