@@ -183,9 +183,42 @@ export async function getMyIssues(options: {
   });
 
   return {
-    issues: res.data.issues,
-    total: res.data.total,
+    issues: res.data.issues || [],
+    total: res.data.total || 0,
   };
+}
+
+/** Lấy TẤT CẢ issues thỏa mãn JQL (tự động phân trang ngầm để vượt qua giới hạn 100) */
+export async function getAllIssuesByJql(
+  jql: string,
+  maxLimit: number = 2000
+): Promise<JiraIssue[]> {
+  const fields = [
+    "summary", "status", "priority", "assignee", "reporter",
+    "timetracking", "worklog", "created", "updated", "duedate",
+    "project", "issuetype", "description", "customfield_10300", "customfield_10302"
+  ];
+  let allIssues: JiraIssue[] = [];
+  let startAt = 0;
+  const maxResults = 100;
+
+  while (true) {
+    const res = await jiraApi.get("/search", {
+      params: { jql, maxResults, startAt, fields: fields.join(",") },
+    });
+    
+    const { issues, total } = res.data;
+    if (issues && issues.length > 0) {
+      allIssues = allIssues.concat(issues);
+    }
+    
+    if (!issues || issues.length === 0 || allIssues.length >= total || allIssues.length >= maxLimit) {
+      break;
+    }
+    startAt += maxResults;
+  }
+  
+  return allIssues;
 }
 
 /** Lấy worklogs của issue */

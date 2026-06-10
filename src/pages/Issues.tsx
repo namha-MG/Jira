@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  getIssuesByProject, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue
+  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
@@ -46,20 +46,31 @@ export default function Issues() {
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
 
+  // Pagination states
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
+
   const fetchIssues = useCallback(async () => {
     if (!isConfigured) return;
     setLoading(true);
     setError(null);
     try {
-      const result = await getIssuesByProject(selectedProject, { maxResults: 100 });
-      setIssues(result.issues);
+      let jql = `project = "${selectedProject}"`;
+      if (timeRange === "month") {
+        jql += ` AND (updated >= startOfMonth() OR worklogDate >= startOfMonth())`;
+      }
+      jql += ` ORDER BY updated DESC`;
+
+      const result = await getAllIssuesByJql(jql);
+      setIssues(result);
+      setPage(1); // Reset trang về 1 mỗi khi load lại
     } catch (err: unknown) {
       const e = err as { message?: string };
       setError(e.message || "Lỗi khi tải issues");
     } finally {
       setLoading(false);
     }
-  }, [selectedProject, isConfigured]);
+  }, [selectedProject, timeRange, isConfigured]);
 
   useEffect(() => { fetchIssues(); }, [fetchIssues]);
 
@@ -164,6 +175,10 @@ export default function Issues() {
       }
       return sortDir === "asc" ? va - vb : vb - va;
     });
+
+  const totalFiltered = filtered.length;
+  const totalPages = Math.ceil(totalFiltered / pageSize) || 1;
+  const paginatedFiltered = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const uniqueStatuses = [...new Set(issues.map((i) => i.fields.status.name))];
   const uniqueAssignees = [...new Map(
@@ -329,12 +344,12 @@ export default function Issues() {
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={i}>
-                    {Array.from({ length: 10 }).map((__, j) => (
+                    {Array.from({ length: 11 }).map((__, j) => (
                       <td key={j}><div className="skeleton" style={{ height: 16, borderRadius: 4 }} /></td>
                     ))}
                   </tr>
                 ))
-              ) : filtered.length === 0 ? (
+              ) : paginatedFiltered.length === 0 ? (
                 <tr>
                   <td colSpan={11}>
                     <div className="empty-state" style={{ padding: 32 }}>
@@ -368,7 +383,7 @@ export default function Issues() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((issue) => {
+                paginatedFiltered.map((issue) => {
                   const est = issue.fields.timetracking?.originalEstimateSeconds || 0;
                   const log = issue.fields.timetracking?.timeSpentSeconds || 0;
                   const pct = est > 0 ? Math.round((log / est) * 100) : (log > 0 ? 100 : 0);
@@ -463,6 +478,29 @@ export default function Issues() {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && !loading && (
+          <div className="pagination" style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 16, padding: "16px 0", marginTop: 8 }}>
+            <button 
+              className="btn btn-secondary btn-sm" 
+              disabled={page === 1}
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+            >
+              Trước
+            </button>
+            <span style={{ fontSize: 13, color: "var(--text-secondary)", fontWeight: 500 }}>
+              Trang {page} / {totalPages}
+            </span>
+            <button 
+              className="btn btn-secondary btn-sm" 
+              disabled={page === totalPages}
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            >
+              Tiếp theo
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Detail Modal */}
