@@ -198,6 +198,8 @@ export function startCronJobs() {
     } finally {
       await client.end();
     }
+  }, {
+    timezone: "Asia/Ho_Chi_Minh"
   });
 }
 
