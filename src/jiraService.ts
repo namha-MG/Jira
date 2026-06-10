@@ -373,6 +373,52 @@ export async function createIssue(options: {
   return res.data;
 }
 
+/** Tạo Sub-task cho một Issue cha */
+export async function createSubTask(options: {
+  parentKey: string;
+  projectKey: string;
+  summary: string;
+  assigneeName?: string;
+  originalEstimate?: string;
+}): Promise<JiraIssue> {
+  // 1. Fetch project info to get the valid sub-task issue type
+  const projRes = await jiraApi.get(`/project/${options.projectKey}`);
+  const issuetypes = projRes.data.issueTypes;
+  const subTaskType = issuetypes.find((t: any) => t.subtask);
+  
+  if (!subTaskType) {
+    throw new Error(`Dự án ${options.projectKey} không hỗ trợ loại Issue là Sub-task`);
+  }
+
+  const fields: any = {
+    project: { key: options.projectKey },
+    parent: { key: options.parentKey },
+    summary: options.summary,
+    issuetype: { id: subTaskType.id },
+  };
+
+  if (options.originalEstimate) {
+    fields.timetracking = {
+      originalEstimate: options.originalEstimate,
+    };
+  }
+
+  if (options.assigneeName && options.assigneeName.trim()) {
+    fields.assignee = { name: options.assigneeName.trim() };
+  } else {
+    try {
+      const me = await getCurrentUser();
+      const meName = me.name || me.accountId;
+      fields.assignee = { name: meName };
+    } catch (e) {
+      console.warn("Auto-assignment failed for sub-task:", e);
+    }
+  }
+
+  const res = await jiraApi.post("/issue", { fields });
+  return res.data;
+}
+
 /** Format seconds sang string hiển thị */
 export function formatSeconds(seconds: number): string {
   if (!seconds) return "0h";

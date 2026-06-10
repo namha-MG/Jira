@@ -27,8 +27,8 @@ export default function JobLogs() {
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
 
-  const fetchJobs = async () => {
-    setLoadingJobs(true);
+  const fetchJobs = async (silent = false) => {
+    if (!silent) setLoadingJobs(true);
     try {
       const res = await fetch("/api/jobs");
       const data = await res.json();
@@ -39,12 +39,12 @@ export default function JobLogs() {
     } catch (err) {
       console.error("Failed to fetch jobs:", err);
     } finally {
-      setLoadingJobs(false);
+      if (!silent) setLoadingJobs(false);
     }
   };
 
-  const fetchTaskLogs = async (jobId: number) => {
-    setLoadingTasks(true);
+  const fetchTaskLogs = async (jobId: number, silent = false) => {
+    if (!silent) setLoadingTasks(true);
     try {
       const res = await fetch(`/api/jobs/${jobId}/tasks`);
       const data = await res.json();
@@ -52,15 +52,14 @@ export default function JobLogs() {
     } catch (err) {
       console.error("Failed to fetch task logs:", err);
     } finally {
-      setLoadingTasks(false);
+      if (!silent) setLoadingTasks(false);
     }
   };
 
   const triggerManualJob = async () => {
     try {
       await fetch("/api/jobs/trigger", { method: "POST" });
-      alert("Đã gửi lệnh chạy Job ngầm. Vui lòng refresh lại sau ít phút để xem kết quả.");
-      setTimeout(fetchJobs, 2000);
+      setTimeout(() => fetchJobs(true), 500); // Đợi backend insert bản ghi rồi refresh nhẹ
     } catch (err) {
       console.error("Trigger error:", err);
       alert("Lỗi khi gọi manual job.");
@@ -69,6 +68,13 @@ export default function JobLogs() {
 
   useEffect(() => {
     fetchJobs();
+    
+    // Polling background để lấy dữ liệu realtime
+    const intervalId = setInterval(() => {
+      fetchJobs(true);
+    }, 3000);
+
+    return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -76,6 +82,15 @@ export default function JobLogs() {
     if (selectedJob !== null) {
       fetchTaskLogs(selectedJob);
     }
+  }, [selectedJob]);
+
+  // Polling task logs ngầm cho job đang được chọn
+  useEffect(() => {
+    if (selectedJob === null) return;
+    const intervalId = setInterval(() => {
+      fetchTaskLogs(selectedJob, true);
+    }, 3000);
+    return () => clearInterval(intervalId);
   }, [selectedJob]);
 
   const formatDateTime = (isoStr: string | null) => {
@@ -105,7 +120,7 @@ export default function JobLogs() {
           <button className="btn btn-primary btn-sm" onClick={triggerManualJob}>
             ▶️ Chạy Job Ngay
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={fetchJobs} disabled={loadingJobs}>
+          <button className="btn btn-secondary btn-sm" onClick={() => fetchJobs()} disabled={loadingJobs}>
             <span className={loadingJobs ? "spinning" : ""}>🔄</span> Refresh
           </button>
         </div>

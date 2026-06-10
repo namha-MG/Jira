@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  getIssuesByProject, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds,
+  getIssuesByProject, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
@@ -33,6 +33,11 @@ export default function Issues() {
   const [sortBy, setSortBy] = useState<"key" | "updated" | "logged" | "estimate" | "startDate">("updated");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [advancedFilter, setAdvancedFilter] = useState("all");
+
+  // Sub-task states
+  const [subTaskModalOpen, setSubTaskModalOpen] = useState<JiraIssue | null>(null);
+  const [subTasks, setSubTasks] = useState([{ summary: "", estimate: "" }]);
+  const [creatingSubTask, setCreatingSubTask] = useState(false);
 
   useEffect(() => {
     setStatusFilter("all");
@@ -414,6 +419,19 @@ export default function Issues() {
                         >
                           Chi tiết
                         </button>
+                        {issue.fields.issuetype?.name === "Task" && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ color: "var(--accent-blue)", marginLeft: 4 }}
+                            onClick={() => {
+                              setSubTaskModalOpen(issue);
+                              setSubTasks([{ summary: "", estimate: "" }]);
+                            }}
+                            title="Tạo Sub-task"
+                          >
+                            + Sub-task
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -509,6 +527,124 @@ export default function Issues() {
               >
                 Mở trong Jira ↗
               </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sub-task Modal */}
+      {subTaskModalOpen && (
+        <div className="modal-overlay" onClick={() => !creatingSubTask && setSubTaskModalOpen(null)}>
+          <div className="modal" style={{ maxWidth: 650 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Tạo nhanh nhiều Sub-task cho {subTaskModalOpen.key}</div>
+              <button className="modal-close" onClick={() => !creatingSubTask && setSubTaskModalOpen(null)}>✕</button>
+            </div>
+            
+            <div style={{ maxHeight: "60vh", overflowY: "auto", paddingRight: 4 }}>
+              {subTasks.map((st, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "flex-start" }}>
+                  <div className="form-group" style={{ flex: 1, margin: 0 }}>
+                    {i === 0 && <label>Tóm tắt (Summary) *</label>}
+                    <input
+                      type="text"
+                      autoFocus={i === 0}
+                      placeholder="Nhập tiêu đề công việc con..."
+                      value={st.summary}
+                      onChange={(e) => {
+                        const newST = [...subTasks];
+                        newST[i].summary = e.target.value;
+                        setSubTasks(newST);
+                      }}
+                      disabled={creatingSubTask}
+                      required
+                    />
+                  </div>
+                  
+                  <div className="form-group" style={{ width: 120, margin: 0 }}>
+                    {i === 0 && <label>Estimate</label>}
+                    <input
+                      type="text"
+                      placeholder="VD: 2h, 30m"
+                      value={st.estimate}
+                      onChange={(e) => {
+                        const newST = [...subTasks];
+                        newST[i].estimate = e.target.value;
+                        setSubTasks(newST);
+                      }}
+                      disabled={creatingSubTask}
+                    />
+                  </div>
+                  
+                  <div style={{ marginTop: i === 0 ? 24 : 4 }}>
+                    <button 
+                      className="btn btn-ghost btn-sm" 
+                      style={{ padding: "8px 12px", color: subTasks.length > 1 ? "var(--accent-red)" : "var(--text-muted)", background: "rgba(255,255,255,0.05)" }}
+                      onClick={() => {
+                        if (subTasks.length > 1) {
+                          setSubTasks(subTasks.filter((_, idx) => idx !== i));
+                        } else {
+                          setSubTasks([{ summary: "", estimate: "" }]);
+                        }
+                      }}
+                      disabled={creatingSubTask}
+                      title="Xóa dòng"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ marginTop: 8, marginBottom: 16 }}>
+              <button 
+                className="btn btn-ghost btn-sm" 
+                style={{ color: "var(--accent-blue)", border: "1px dashed var(--accent-blue)" }}
+                onClick={() => setSubTasks([...subTasks, { summary: "", estimate: "" }])}
+                disabled={creatingSubTask}
+              >
+                + Thêm Sub-task
+              </button>
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setSubTaskModalOpen(null)} disabled={creatingSubTask}>Hủy</button>
+              <button 
+                className="btn btn-primary" 
+                disabled={subTasks.every(st => !st.summary.trim()) || creatingSubTask}
+                onClick={async () => {
+                  const validTasks = subTasks.filter(st => st.summary.trim());
+                  if (validTasks.length === 0) return;
+                  
+                  setCreatingSubTask(true);
+                  try {
+                    // Create sequentially to avoid overwhelming Jira API
+                    for (const st of validTasks) {
+                      await createSubTask({
+                        parentKey: subTaskModalOpen.key,
+                        projectKey: subTaskModalOpen.fields.project.key,
+                        summary: st.summary.trim(),
+                        originalEstimate: st.estimate.trim() || undefined
+                      });
+                    }
+                    setSubTaskModalOpen(null);
+                    fetchIssues(); // Refresh list
+                  } catch (e: any) {
+                    let msg = e.message || "Unknown error";
+                    if (e.response?.data?.errorMessages?.length) {
+                      msg = e.response.data.errorMessages[0];
+                    } else if (e.response?.data?.errors) {
+                      msg = Object.values(e.response.data.errors).join(", ");
+                    }
+                    alert("Lỗi khi tạo sub-task: " + msg);
+                  } finally {
+                    setCreatingSubTask(false);
+                  }
+                }}
+              >
+                {creatingSubTask ? "Đang tạo..." : `Tạo ${subTasks.filter(st => st.summary.trim()).length} Sub-task`}
+              </button>
             </div>
           </div>
         </div>
