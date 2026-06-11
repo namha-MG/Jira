@@ -288,11 +288,21 @@ export default function Dashboard() {
   const totalRemaining = filteredIssues.reduce((s, i) => s + (i.fields.timetracking?.remainingEstimateSeconds || 0), 0);
   const logPct = totalEstimated > 0 ? Math.round((totalLogged / totalEstimated) * 100) : 0;
 
-  // ── Status distribution ──
+  // ── Status & Type distribution ──
   const statusCounts: Record<string, number> = {};
+  let uatBugCount = 0;
+  let prodBugCount = 0;
+
   filteredIssues.forEach((i) => {
     const s = i.fields.status.name;
     statusCounts[s] = (statusCounts[s] || 0) + 1;
+
+    const typeName = i.fields.issuetype?.name?.toLowerCase() || "";
+    if (typeName.includes("uat bug")) {
+      uatBugCount++;
+    } else if (typeName.includes("production bug") || typeName === "bug") {
+      prodBugCount++;
+    }
   });
   const pieData = Object.entries(statusCounts).map(([name, value]) => ({ name, value }));
 
@@ -599,13 +609,29 @@ export default function Dashboard() {
         ) : (
           <>
             {/* Stat Cards */}
-            <div className="stats-grid">
+            <div className="stats-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
               <div className="stat-card">
                 <div className="stat-icon">📋</div>
                 <div className="stat-value">{issues.length}</div>
                 <div className="stat-label">Tổng Issues</div>
                 <div className="stat-change neutral">
                   {statusCounts["In Progress"] || 0} đang thực hiện
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-icon">🐞</div>
+                <div className="stat-value" style={{ color: "var(--accent-orange)" }}>{uatBugCount}</div>
+                <div className="stat-label">UAT Bug</div>
+                <div className="stat-change neutral">
+                  Trong kỳ này
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-icon">🚨</div>
+                <div className="stat-value" style={{ color: "var(--accent-red)" }}>{prodBugCount}</div>
+                <div className="stat-label">Production Bug</div>
+                <div className="stat-change neutral">
+                  Trong kỳ này
                 </div>
               </div>
               <div className="stat-card">
