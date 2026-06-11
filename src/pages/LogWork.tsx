@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { addWorklog, parseTimeToSeconds, getMyIssues, JiraIssue, getTransitions, transitionIssue, getIssue, getJiraFields } from "../jiraService";
+import { addWorklog, parseTimeToSeconds, getMyIssues, JiraIssue, getTransitions, transitionIssue, getIssue, getJiraFields, generateAiOutput } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
 interface Toast { id: number; type: "success" | "error"; msg: string; }
@@ -130,7 +130,7 @@ export default function LogWork() {
     }
   };
 
-  const handleAutoTransition = async (key: string) => {
+  const handleAutoTransition = async (key: string, summary: string) => {
     addToast("success", `⏱️ Đang tự động cập nhật trạng thái cho ${key} vì đã log đủ thời gian estimate...`);
     try {
       let transitions = await getTransitions(key);
@@ -162,7 +162,10 @@ export default function LogWork() {
         const allFields = await getJiraFields();
         const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
         const transitionFields: any = { resolution: { id: "10000" } };
-        if (outputField) transitionFields[outputField.id] = "Tự động hoàn thành";
+        if (outputField) {
+           const aiOutput = await generateAiOutput(summary);
+           transitionFields[outputField.id] = aiOutput;
+        }
 
         await transitionIssue(key, toResolved.id, transitionFields);
         addToast("success", `🔄 Đã chuyển ${key} sang trạng thái: ${toResolved.to.name}`);
@@ -180,7 +183,10 @@ export default function LogWork() {
         const allFields = await getJiraFields();
         const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
         const transitionFields: any = { resolution: { id: "10000" } };
-        if (outputField) transitionFields[outputField.id] = "Tự động hoàn thành";
+        if (outputField) {
+           const aiOutput = await generateAiOutput(summary);
+           transitionFields[outputField.id] = aiOutput;
+        }
 
         await transitionIssue(key, toClosed.id, transitionFields);
         addToast("success", `🔒 Đã đóng (Closed) issue ${key} thành công!`);
@@ -318,7 +324,7 @@ export default function LogWork() {
           const newTotalLogged = currentLogged + seconds;
 
           if (est > 0 && newTotalLogged >= est) {
-            setTimeout(() => handleAutoTransition(key), 1000);
+            setTimeout(() => handleAutoTransition(key, issueObj.fields.summary), 1000);
           }
         }
       } catch (err: unknown) {

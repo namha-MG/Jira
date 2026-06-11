@@ -1031,7 +1031,7 @@ export default function Issues() {
             </div>
 
             <div className="form-group">
-              <label>Output *</label>
+              <label>Output</label>
               <textarea
                 value={resolveOutput}
                 onChange={(e) => setResolveOutput(e.target.value)}
@@ -1056,7 +1056,7 @@ export default function Issues() {
               <button className="btn btn-secondary" onClick={() => setResolveModalOpen(null)} disabled={resolvingIssue}>Cancel</button>
               <button
                 className="btn btn-primary"
-                disabled={resolvingIssue || !resolveResolution || !resolveOutput.trim()}
+                disabled={resolvingIssue || !resolveResolution}
                 onClick={async () => {
                   try {
                     setResolvingIssue(true);

@@ -1,4 +1,4 @@
-import { getMyIssues, getTransitions, transitionIssue, addWorklog, getJiraFields } from "./jiraService";
+import { getMyIssues, getTransitions, transitionIssue, addWorklog, getJiraFields, generateAiOutput } from "./jiraService";
 import { JIRA_PROJECTS } from "./config";
 
 export async function silentAutoProcessTasks(onProgress?: (msg: string) => void) {
@@ -77,7 +77,10 @@ export async function silentAutoProcessTasks(onProgress?: (msg: string) => void)
             const allFields = await getJiraFields();
             const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
             const transitionFields: any = { resolution: { id: "10000" } };
-            if (outputField) transitionFields[outputField.id] = "Tự động hoàn thành";
+            if (outputField) {
+               const aiOutput = await generateAiOutput(issue.fields.summary);
+               transitionFields[outputField.id] = aiOutput;
+            }
 
             await transitionIssue(issue.key, toClosed.id, transitionFields);
             closedCount++;

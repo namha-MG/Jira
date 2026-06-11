@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 import {
-  getMyIssues, JiraIssue, formatSeconds, getTransitions, transitionIssue, getJiraFields
+  getMyIssues, JiraIssue, formatSeconds, getTransitions, transitionIssue, getJiraFields, generateAiOutput
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
@@ -131,7 +131,10 @@ export default function Dashboard() {
           const allFields = await getJiraFields();
           const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
           const transitionFields: any = { resolution: { id: "10000" } };
-          if (outputField) transitionFields[outputField.id] = "Tự động hoàn thành";
+          if (outputField) {
+             const aiOutput = await generateAiOutput(task.fields.summary);
+             transitionFields[outputField.id] = aiOutput;
+          }
 
           await transitionIssue(key, toResolved.id, transitionFields);
           transitions = await getTransitions(key);
@@ -147,7 +150,10 @@ export default function Dashboard() {
           const allFields = await getJiraFields();
           const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
           const transitionFields: any = { resolution: { id: "10000" } };
-          if (outputField) transitionFields[outputField.id] = "Tự động hoàn thành";
+          if (outputField) {
+             const aiOutput = await generateAiOutput(task.fields.summary);
+             transitionFields[outputField.id] = aiOutput;
+          }
 
           await transitionIssue(key, toClosed.id, transitionFields);
         }

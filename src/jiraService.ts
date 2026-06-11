@@ -520,6 +520,30 @@ export async function transitionIssue(issueKey: string, transitionId: string, tr
   await jiraApi.post(`/issue/${issueKey}/transitions`, payload);
 }
 
+/** Tự động sinh Output bằng AI */
+export async function generateAiOutput(summary: string): Promise<string> {
+  const fallback = "Hoàn thành công việc";
+  const geminiKey = localStorage.getItem("gemini_api_key");
+  if (!geminiKey) return fallback;
+
+  try {
+    const prompt = `Bạn là một lập trình viên. Hãy viết kết quả (Output) ngắn gọn (dưới 15 từ) cho công việc có tiêu đề: "${summary}". Ví dụ: "Đã fixed", "Đã cập nhật theo yêu cầu". Viết bằng tiếng Việt, ngắn gọn.`;
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    });
+    if (response.ok) {
+      const data = await response.json();
+      const generated = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (generated) return generated;
+    }
+  } catch (e) {
+    console.warn("Auto AI output generation failed", e);
+  }
+  return fallback;
+}
+
 /** Tìm ngày bắt đầu tiếp theo dựa trên task cuối cùng đã tạo/được gán */
 export async function getLatestTaskDate(projectKeys: string[], assignee?: string): Promise<Date | null> {
   try {
