@@ -96,6 +96,16 @@ export async function silentAutoProcessTasks(onProgress?: (msg: string) => void)
               }
             }
             
+            // Nếu là UAT bug thì xử lý thêm bước UAT
+            const isUatBug = issue.fields.issuetype?.name?.toLowerCase() === "uat bug";
+            if (isUatBug) {
+              let toUat = newTransitions.find(t => t.to.name.toLowerCase().includes("uat") || t.name.toLowerCase().includes("uat"));
+              if (toUat) {
+                await transitionIssue(issue.key, toUat.id);
+                newTransitions = await getTransitions(issue.key);
+              }
+            }
+            
             let toRealClosed = newTransitions.find(t => t.to.name.toLowerCase() === "closed" || t.to.name.toLowerCase() === "đóng" || t.name.toLowerCase().includes("close"));
             if (toRealClosed) {
               await transitionIssue(issue.key, toRealClosed.id);

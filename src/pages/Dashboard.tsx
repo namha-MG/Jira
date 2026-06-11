@@ -151,6 +151,17 @@ export default function Dashboard() {
           }
         }
 
+        // 2.7 Chuyển sang UAT (nếu là UAT bug)
+        const isUatBug = task.fields.issuetype?.name?.toLowerCase() === "uat bug";
+        if (isUatBug) {
+          const toUat = transitions.find(t => t.to.name.toLowerCase().includes("uat") || t.name.toLowerCase().includes("uat"));
+          if (toUat) {
+            setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toUat.to.name}`);
+            await transitionIssue(key, toUat.id);
+            transitions = await getTransitions(key);
+          }
+        }
+
         // 3. Chuyển sang Closed/Đóng
         const toClosed = transitions.find(t => 
           closedKeywords.includes(t.to.name.toLowerCase()) || 

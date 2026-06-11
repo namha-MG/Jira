@@ -198,6 +198,16 @@ export default function Issues() {
           await transitionIssue(issue.key, toCommit.id);
           newTransitions = await getTransitions(issue.key);
         }
+        
+        // Nếu là UAT bug thì chuyển sang UAT
+        const isUatBug = issue.fields.issuetype?.name?.toLowerCase() === "uat bug";
+        if (isUatBug) {
+          let toUat = newTransitions.find(t => t.to.name.toLowerCase().includes("uat") || t.name.toLowerCase().includes("uat"));
+          if (toUat) {
+            await transitionIssue(issue.key, toUat.id);
+            newTransitions = await getTransitions(issue.key);
+          }
+        }
         let toClosed = newTransitions.find(t => t.to.name.toLowerCase() === "closed" || t.to.name.toLowerCase() === "đóng" || t.name.toLowerCase().includes("close"));
         if (toClosed) {
           await transitionIssue(issue.key, toClosed.id);
@@ -1121,6 +1131,16 @@ export default function Issues() {
                       let toCommit = newTransitions.find(t => t.to.name.toLowerCase().includes("commit") || t.name.toLowerCase().includes("commit"));
                       if (toCommit) {
                         await transitionIssue(resolveModalOpen.key, toCommit.id);
+                        newTransitions = await getTransitions(resolveModalOpen.key);
+                      }
+                    }
+                    
+                    // Nếu là UAT bug thì chuyển sang UAT
+                    const isUatBug = resolveModalOpen.fields.issuetype?.name?.toLowerCase() === "uat bug";
+                    if (isUatBug) {
+                      let toUat = newTransitions.find(t => t.to.name.toLowerCase().includes("uat") || t.name.toLowerCase().includes("uat"));
+                      if (toUat) {
+                        await transitionIssue(resolveModalOpen.key, toUat.id);
                         newTransitions = await getTransitions(resolveModalOpen.key);
                       }
                     }

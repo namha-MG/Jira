@@ -185,6 +185,17 @@ export default function LogWork() {
         }
       }
 
+      // 2.7 Chuyển sang UAT (nếu là UAT bug)
+      const isUatBug = issueDetails.fields.issuetype?.name?.toLowerCase() === "uat bug";
+      if (isUatBug) {
+        const toUat = transitions.find(t => t.to.name.toLowerCase().includes("uat") || t.name.toLowerCase().includes("uat"));
+        if (toUat) {
+          await transitionIssue(key, toUat.id);
+          addToast("success", `🔄 Đã chuyển ${key} sang trạng thái: ${toUat.to.name}`);
+          transitions = await getTransitions(key);
+        }
+      }
+
       // 3. Chuyển sang Closed/Đóng
       const toClosed = transitions.find(t => 
         closedKeywords.includes(t.to.name.toLowerCase()) || 
