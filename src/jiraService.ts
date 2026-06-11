@@ -83,7 +83,39 @@ export type JiraIssue = {
         priority: { name: string; iconUrl: string };
       };
     }[];
+    comment?: {
+      comments: JiraComment[];
+      total: number;
+    };
   };
+  changelog?: {
+    histories: JiraChangelogHistory[];
+    total: number;
+  };
+};
+
+export type JiraChangelogItem = {
+  field: string;
+  fieldtype: string;
+  from: string | null;
+  fromString: string | null;
+  to: string | null;
+  toString: string | null;
+};
+
+export type JiraChangelogHistory = {
+  id: string;
+  author: JiraUser;
+  created: string;
+  items: JiraChangelogItem[];
+};
+
+export type JiraComment = {
+  id: string;
+  author: JiraUser;
+  body: string;
+  created: string;
+  updated: string;
 };
 
 export type JiraWorklog = {
@@ -166,7 +198,7 @@ export async function getIssuesByProject(
 
 /** Lấy thông tin chi tiết một Issue theo Key */
 export async function getIssue(issueKey: string): Promise<JiraIssue> {
-  const res = await jiraApi.get(`/issue/${issueKey}`);
+  const res = await jiraApi.get(`/issue/${issueKey}?expand=changelog`);
   return res.data;
 }
 
@@ -570,5 +602,87 @@ export async function getLatestTaskDate(projectKeys: string[], assignee?: string
   } catch (err) {
     console.warn("Failed to get latest task date", err);
     return null;
+  }
+}
+
+export type JiraNotification = {
+  id: string; // "comment-12345" or "history-12345"
+  issueKey: string;
+  issueSummary: string;
+  authorName: string;
+  authorAvatar: string;
+  content: string; // body of comment, or description of change
+  created: string;
+  type: "comment" | "changelog";
+};
+
+/** Lấy thông báo từ những QA (hoaintt, dungta2) trong 14 ngày gần đây */
+export async function getRecentNotificationsForUser(): Promise<JiraNotification[]> {
+  const jql = `assignee = currentUser() AND updated >= -14d ORDER BY updated DESC`;
+  const maxResults = 50;
+  
+  try {
+    const res = await jiraApi.get("/search", {
+      params: {
+        jql,
+        maxResults,
+        fields: "summary,comment",
+        expand: "changelog"
+      }
+    });
+
+    const issues = res.data.issues || [];
+    const notifications: JiraNotification[] = [];
+    const targetUsers = ["hoaintt", "dungta2"]; // Tài khoản QA
+
+    const isTargetUser = (u: JiraUser) => {
+      if (!u) return false;
+      const str = `${u.name} ${u.emailAddress} ${u.displayName}`.toLowerCase();
+      return targetUsers.some(tu => str.includes(tu.toLowerCase()));
+    };
+
+    issues.forEach((issue: any) => {
+      // 1. Kiểm tra comments
+      if (issue.fields.comment && issue.fields.comment.comments) {
+        issue.fields.comment.comments.forEach((c: any) => {
+          if (isTargetUser(c.author)) {
+            notifications.push({
+              id: `comment-${c.id}`,
+              issueKey: issue.key,
+              issueSummary: issue.fields.summary,
+              authorName: c.author.displayName || c.author.name,
+              authorAvatar: c.author.avatarUrls?.["48x48"] || "",
+              content: `Bình luận: ${c.body.substring(0, 100)}${c.body.length > 100 ? "..." : ""}`,
+              created: c.created,
+              type: "comment"
+            });
+          }
+        });
+      }
+
+      // 2. Kiểm tra changelog (History)
+      if (issue.changelog && issue.changelog.histories) {
+        issue.changelog.histories.forEach((h: any) => {
+          if (isTargetUser(h.author)) {
+            const changes = h.items.map((i: any) => `${i.field} (${i.fromString || "trống"} ➔ ${i.toString || "trống"})`).join(", ");
+            notifications.push({
+              id: `history-${h.id}`,
+              issueKey: issue.key,
+              issueSummary: issue.fields.summary,
+              authorName: h.author.displayName || h.author.name,
+              authorAvatar: h.author.avatarUrls?.["48x48"] || "",
+              content: `Đã thay đổi: ${changes}`,
+              created: h.created,
+              type: "changelog"
+            });
+          }
+        });
+      }
+    });
+
+    return notifications.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+  } catch (error) {
+    console.error("Failed to fetch notifications:", error);
+    return [];
   }
 }

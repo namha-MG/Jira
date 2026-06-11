@@ -7,6 +7,7 @@ import {
   getMyIssues, JiraIssue, formatSeconds, getTransitions, transitionIssue, getJiraFields, generateAiOutput
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
+import NotificationBell from "../components/NotificationBell";
 
 interface ProjectStat {
   projectKey: string;
@@ -450,7 +451,8 @@ export default function Dashboard() {
         </div>
 
         {/* Bộ lọc thời gian */}
-        <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+        <div style={{ display: "flex", gap: 6, marginLeft: "auto", alignItems: "center" }}>
+          <NotificationBell />
           <button
             className={`btn btn-sm ${timeRange === "month" ? "btn-primary" : "btn-secondary"}`}
             onClick={() => setTimeRange("month")}

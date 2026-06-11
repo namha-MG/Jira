@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { addWorklog, parseTimeToSeconds, getMyIssues, JiraIssue, getTransitions, transitionIssue, getIssue, getJiraFields, generateAiOutput } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
+import NotificationBell from "../components/NotificationBell";
 
 interface Toast { id: number; type: "success" | "error"; msg: string; }
 
@@ -407,6 +408,9 @@ export default function LogWork() {
         <div className="page-title-group">
           <h1 className="page-title">Log Công Việc</h1>
           <p className="page-subtitle">Ghi nhận thời gian làm việc vào Jira issue</p>
+        </div>
+        <div className="page-actions" style={{ marginLeft: "auto" }}>
+          <NotificationBell />
         </div>
       </div>
 

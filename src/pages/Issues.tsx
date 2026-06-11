@@ -3,6 +3,7 @@ import {
   getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
+import NotificationBell from "../components/NotificationBell";
 
 function getBadgeClass(status: string): string {
   if (status === "In Progress") return "badge badge-inprogress";
@@ -25,6 +26,7 @@ export default function Issues() {
   const [error, setError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
   const [assigneeFilter, setAssigneeFilter] = useState("all");
   const [selectedIssue, setSelectedIssue] = useState<JiraIssue | null>(null);
   const [worklogs, setWorklogs] = useState<JiraWorklog[]>([]);
@@ -130,6 +132,9 @@ export default function Issues() {
     try {
       const logs = await getWorklogs(issue.key);
       setWorklogs(logs);
+      
+      const fullIssue = await getIssue(issue.key);
+      setSelectedIssue(prev => prev?.key === issue.key ? { ...prev, ...fullIssue } : prev);
     } catch {
       setWorklogs([]);
     } finally {
@@ -272,7 +277,9 @@ export default function Issues() {
         }
       }
 
-      return matchText && matchStatus && matchTime && matchAssignee && matchAdvanced;
+      const matchType = typeFilter === "all" || i.fields.issuetype?.name === typeFilter;
+
+      return matchText && matchStatus && matchTime && matchAssignee && matchAdvanced && matchType;
     })
     .sort((a, b) => {
       let va = 0, vb = 0;
@@ -306,6 +313,7 @@ export default function Issues() {
   const paginatedFiltered = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const uniqueStatuses = [...new Set(issues.map((i) => i.fields.status.name))];
+  const uniqueTypes = [...new Set(issues.map((i) => i.fields.issuetype?.name).filter(Boolean))];
   // Filter out duplicates in projectUsers (just in case)
   const uniqueAssignees = [...new Map(
     projectUsers.map((a) => [a.name || a.accountId || a.emailAddress, a])
@@ -338,7 +346,8 @@ export default function Issues() {
           <h1 className="page-title">Danh sách Issues</h1>
           <p className="page-subtitle">{filtered.length}/{issues.length} issues • Project: {selectedProject}</p>
         </div>
-        <div className="page-actions">
+        <div className="page-actions" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <NotificationBell />
           <button id="btn-refresh-issues" className="btn btn-secondary btn-sm" onClick={fetchIssues} disabled={loading}>
             <span className={loading ? "spinning" : ""}>🔄</span> {loading ? "Đang tải..." : "Refresh"}
           </button>
@@ -439,6 +448,15 @@ export default function Issues() {
             >
               <option value="all">Tất cả status</option>
               {uniqueStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select
+              id="select-type-filter"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              style={{ width: 140 }}
+            >
+              <option value="all">Tất cả loại task</option>
+              {uniqueTypes.map((t) => <option key={t as string} value={t as string}>{t}</option>)}
             </select>
             <select
               id="select-assignee-filter"
@@ -776,6 +794,75 @@ export default function Issues() {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+
+            {/* Hoạt động & Bình luận */}
+            <div style={{ marginTop: 24 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, color: "var(--text-primary)" }}>
+                🕒 Lịch sử & Bình luận
+              </div>
+              {worklogLoading ? (
+                 <div style={{ fontSize: 13, color: "var(--text-muted)", textAlign: "center", padding: "16px 0" }}>Đang tải...</div>
+              ) : (
+                <div style={{ maxHeight: 240, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
+                  {(() => {
+                    const items: any[] = [];
+                    if (selectedIssue.fields.comment?.comments) {
+                      selectedIssue.fields.comment.comments.forEach((c) => {
+                        items.push({ type: "comment", id: c.id, author: c.author, created: c.created, body: c.body });
+                      });
+                    }
+                    if (selectedIssue.changelog?.histories) {
+                      selectedIssue.changelog.histories.forEach((h) => {
+                        items.push({ type: "history", id: h.id, author: h.author, created: h.created, items: h.items });
+                      });
+                    }
+                    
+                    items.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+                    
+                    if (items.length === 0) {
+                      return <div style={{ fontSize: 13, color: "var(--text-muted)", textAlign: "center", padding: "16px 0" }}>Chưa có hoạt động nào</div>;
+                    }
+
+                    return items.map(item => (
+                      <div key={`${item.type}-${item.id}`} style={{ padding: "12px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-card)" }}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                          {item.author?.avatarUrls?.["48x48"] ? (
+                            <img src={item.author.avatarUrls["48x48"]} alt="" style={{ width: 24, height: 24, borderRadius: "50%" }} />
+                          ) : (
+                            <div style={{ width: 24, height: 24, borderRadius: "50%", background: "var(--border)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>
+                              {(item.author?.displayName || item.author?.name || "?").charAt(0)}
+                            </div>
+                          )}
+                          <div style={{ fontSize: 13, display: "flex", flexWrap: "wrap", alignItems: "center" }}>
+                            <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{item.author?.displayName || item.author?.name || "Unknown"}</span>
+                            <span style={{ color: "var(--text-secondary)", marginLeft: 4, fontSize: 12 }}>
+                              {item.type === "comment" ? "đã bình luận" : "made changes"} - {new Date(item.created).toLocaleString("vi-VN")}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div style={{ paddingLeft: 32 }}>
+                          {item.type === "comment" ? (
+                            <div style={{ fontSize: 13, color: "var(--text-primary)", whiteSpace: "pre-wrap" }}>{item.body}</div>
+                          ) : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                              {item.items.map((ch: any, idx: number) => (
+                                <div key={idx} style={{ fontSize: 13, display: "flex", alignItems: "flex-start", flexWrap: "wrap", gap: 6 }}>
+                                  <span style={{ color: "var(--text-secondary)", minWidth: 100 }}>{ch.field}</span>
+                                  {ch.fromString && <span style={{ textDecoration: "line-through", color: "var(--text-muted)", background: "rgba(255,255,255,0.05)", padding: "0 4px", borderRadius: 4 }}>{ch.fromString}</span>}
+                                  {ch.fromString && <span style={{ color: "var(--text-secondary)" }}>➔</span>}
+                                  <span style={{ color: "var(--text-primary)", fontWeight: 500, background: "rgba(255,255,255,0.05)", padding: "0 4px", borderRadius: 4 }}>{ch.toString || "trống"}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ));
+                  })()}
                 </div>
               )}
             </div>
