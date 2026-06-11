@@ -140,6 +140,17 @@ export default function Dashboard() {
           transitions = await getTransitions(key);
         }
 
+        // 2.5 Chuyển sang Commit (nếu có) - CHỈ DÀNH CHO BUG
+        const isBug = task.fields.issuetype?.name?.toLowerCase().includes("bug");
+        if (isBug) {
+          const toCommit = transitions.find(t => t.to.name.toLowerCase().includes("commit") || t.name.toLowerCase().includes("commit"));
+          if (toCommit) {
+            setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toCommit.to.name}`);
+            await transitionIssue(key, toCommit.id);
+            transitions = await getTransitions(key);
+          }
+        }
+
         // 3. Chuyển sang Closed/Đóng
         const toClosed = transitions.find(t => 
           closedKeywords.includes(t.to.name.toLowerCase()) || 

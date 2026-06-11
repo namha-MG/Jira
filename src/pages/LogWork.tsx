@@ -173,6 +173,18 @@ export default function LogWork() {
         transitions = await getTransitions(key);
       }
 
+      // 2.5 Chuyển sang Commit (nếu có) - CHỈ DÀNH CHO BUG
+      const issueDetails = await getIssue(key);
+      const isBug = issueDetails.fields.issuetype?.name?.toLowerCase().includes("bug");
+      if (isBug) {
+        const toCommit = transitions.find(t => t.to.name.toLowerCase().includes("commit") || t.name.toLowerCase().includes("commit"));
+        if (toCommit) {
+          await transitionIssue(key, toCommit.id);
+          addToast("success", `🔄 Đã chuyển ${key} sang trạng thái: ${toCommit.to.name}`);
+          transitions = await getTransitions(key);
+        }
+      }
+
       // 3. Chuyển sang Closed/Đóng
       const toClosed = transitions.find(t => 
         closedKeywords.includes(t.to.name.toLowerCase()) || 

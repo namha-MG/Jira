@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields
+  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
@@ -189,8 +189,31 @@ export default function Issues() {
       setResolveResolution("10000");
       setResolveOutput("");
       setResolveComment("");
+    } else if (status === "fixed" || status === "resolved" || status === "done" || status === "hoàn thành") {
+      try {
+        setResolvingIssue(true);
+        let newTransitions = await getTransitions(issue.key);
+        let toCommit = newTransitions.find(t => t.to.name.toLowerCase().includes("commit") || t.name.toLowerCase().includes("commit"));
+        if (toCommit) {
+          await transitionIssue(issue.key, toCommit.id);
+          newTransitions = await getTransitions(issue.key);
+        }
+        let toClosed = newTransitions.find(t => t.to.name.toLowerCase() === "closed" || t.to.name.toLowerCase() === "đóng" || t.name.toLowerCase().includes("close"));
+        if (toClosed) {
+          await transitionIssue(issue.key, toClosed.id);
+        }
+        fetchIssues();
+        if (selectedIssue && (selectedIssue.key === issue.key || selectedIssue.fields.subtasks?.some(s => s.key === issue.key))) {
+           const freshIssue = await getIssue(selectedIssue.key);
+           setSelectedIssue(freshIssue);
+        }
+      } catch (e: any) {
+        alert("Lỗi khi chuyển trạng thái: " + (e.message || "Unknown error"));
+      } finally {
+        setResolvingIssue(false);
+      }
     } else {
-      alert("Tính năng này chỉ hỗ trợ chuyển từ Open -> In Progress -> Fixed");
+      alert("Tính năng này chỉ hỗ trợ chuyển từ Open -> In Progress -> Fixed -> Commit -> Closed");
     }
   };
 
@@ -591,7 +614,7 @@ export default function Issues() {
                           </button>
                         )}
                         {isBugTask(issue.fields.issuetype?.name) && 
-                         !["fixed", "resolved", "done", "closed", "đóng", "hoàn thành"].some(s => issue.fields.status?.name?.toLowerCase().includes(s)) && (
+                         !["closed", "đóng", "hoàn thành", "commit"].some(s => issue.fields.status?.name?.toLowerCase().includes(s)) && (
                             <button
                               className="btn btn-ghost btn-sm"
                               style={{ color: "var(--accent-purple)", marginLeft: 4 }}
@@ -1065,49 +1088,48 @@ export default function Issues() {
                     // Lấy transition Fixed
                     const transitions = await getTransitions(resolveModalOpen.key);
                     const toFixed = transitions.find(t => t.to.name.toLowerCase() === "fixed" || t.to.name.toLowerCase() === "resolved" || t.to.name.toLowerCase() === "done");
-                    if (!toFixed) {
-                      throw new Error("Không tìm thấy transition sang Fixed/Resolved");
-                    }
-
-                    // Tìm ID của custom field Output
-                    const allFields = await getJiraFields();
-                    const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
-                    const outputFieldId = outputField ? outputField.id : "customfield_10000"; // fallback
-
-                    const transitionFields: any = {
-                      resolution: { id: resolveResolution }
-                    };
                     
-                    let finalOutput = resolveOutput.trim();
-                    if (!finalOutput) {
-                      const geminiKey = localStorage.getItem("gemini_api_key");
-                      if (geminiKey) {
-                        try {
-                          const summary = resolveModalOpen.fields.summary;
-                          const prompt = `Bạn là một lập trình viên. Hãy viết kết quả (Output) ngắn gọn (dưới 15 từ) cho công việc có tiêu đề: "${summary}". Ví dụ: "Đã fixed", "Đã cập nhật theo yêu cầu". Viết bằng tiếng Việt, ngắn gọn.`;
-                          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-                          });
-                          if (response.ok) {
-                            const data = await response.json();
-                            finalOutput = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-                          }
-                        } catch (e) {
-                          console.warn("Auto AI output generation failed", e);
-                        }
+                    if (toFixed) {
+                      // Tìm ID của custom field Output
+                      const allFields = await getJiraFields();
+                      const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
+                      const outputFieldId = outputField ? outputField.id : "customfield_10000"; // fallback
+
+                      const transitionFields: any = {
+                        resolution: { id: resolveResolution }
+                      };
+                      
+                      let finalOutput = resolveOutput.trim();
+                      if (!finalOutput) {
+                         finalOutput = await generateAiOutput(resolveModalOpen.fields.summary);
                       }
                       if (!finalOutput) {
                         finalOutput = `Đã hoàn thành: ${resolveModalOpen.fields.summary}`;
                       }
-                    }
 
-                    if (outputFieldId) {
-                      transitionFields[outputFieldId] = finalOutput;
-                    }
+                      if (outputFieldId) {
+                        transitionFields[outputFieldId] = finalOutput;
+                      }
 
-                    await transitionIssue(resolveModalOpen.key, toFixed.id, transitionFields, resolveComment.trim() || undefined);
+                      await transitionIssue(resolveModalOpen.key, toFixed.id, transitionFields, resolveComment.trim() || undefined);
+                    }
+                    
+                    // Chuyển sang Commit (nếu có) - CHỈ DÀNH CHO BUG
+                    let newTransitions = await getTransitions(resolveModalOpen.key);
+                    const isBug = resolveModalOpen.fields.issuetype?.name?.toLowerCase().includes("bug");
+                    if (isBug) {
+                      let toCommit = newTransitions.find(t => t.to.name.toLowerCase().includes("commit") || t.name.toLowerCase().includes("commit"));
+                      if (toCommit) {
+                        await transitionIssue(resolveModalOpen.key, toCommit.id);
+                        newTransitions = await getTransitions(resolveModalOpen.key);
+                      }
+                    }
+                    
+                    // Chuyển sang Closed (nếu có)
+                    let toClosed = newTransitions.find(t => t.to.name.toLowerCase() === "closed" || t.to.name.toLowerCase() === "đóng" || t.name.toLowerCase().includes("close"));
+                    if (toClosed) {
+                      await transitionIssue(resolveModalOpen.key, toClosed.id);
+                    }
                     
                     setResolveModalOpen(null);
                     fetchIssues();

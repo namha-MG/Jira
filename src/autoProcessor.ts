@@ -68,7 +68,7 @@ export async function silentAutoProcessTasks(onProgress?: (msg: string) => void)
         // Transition to closed
         try {
           const transitions = await getTransitions(issue.key);
-          const closedKeywords = ["closed", "đóng", "resolved", "done", "đã giải quyết", "hoàn thành"];
+          const closedKeywords = ["closed", "đóng", "resolved", "done", "đã giải quyết", "hoàn thành", "fixed"];
           const toClosed = transitions.find(t => 
             closedKeywords.includes(t.to.name.toLowerCase()) || 
             closedKeywords.some(kw => t.name.toLowerCase().includes(kw))
@@ -84,6 +84,22 @@ export async function silentAutoProcessTasks(onProgress?: (msg: string) => void)
 
             await transitionIssue(issue.key, toClosed.id, transitionFields);
             closedCount++;
+            
+            // Nếu là Bug thì xử lý bước Commit
+            let newTransitions = await getTransitions(issue.key);
+            const isBug = issue.fields.issuetype?.name?.toLowerCase().includes("bug");
+            if (isBug) {
+              let toCommit = newTransitions.find(t => t.to.name.toLowerCase().includes("commit") || t.name.toLowerCase().includes("commit"));
+              if (toCommit) {
+                await transitionIssue(issue.key, toCommit.id);
+                newTransitions = await getTransitions(issue.key);
+              }
+            }
+            
+            let toRealClosed = newTransitions.find(t => t.to.name.toLowerCase() === "closed" || t.to.name.toLowerCase() === "đóng" || t.name.toLowerCase().includes("close"));
+            if (toRealClosed) {
+              await transitionIssue(issue.key, toRealClosed.id);
+            }
           }
         } catch (e) {
           console.warn(`Failed to auto-close ${issue.key}`, e);
