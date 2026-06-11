@@ -72,6 +72,17 @@ export type JiraIssue = {
     description?: string;
     customfield_10300?: string;
     customfield_10302?: string;
+    parent?: { key: string; fields?: any; };
+    subtasks?: {
+      id: string;
+      key: string;
+      fields: {
+        summary: string;
+        status: { name: string; statusCategory: { colorName: string } };
+        issuetype: { name: string; iconUrl: string };
+        priority: { name: string; iconUrl: string };
+      };
+    }[];
   };
 };
 
@@ -196,7 +207,7 @@ export async function getAllIssuesByJql(
   const fields = [
     "summary", "status", "priority", "assignee", "reporter",
     "timetracking", "worklog", "created", "updated", "duedate",
-    "project", "issuetype", "description", "customfield_10300", "customfield_10302"
+    "project", "issuetype", "description", "customfield_10300", "customfield_10302", "parent", "subtasks"
   ];
   let allIssues: JiraIssue[] = [];
   let startAt = 0;

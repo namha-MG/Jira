@@ -33,6 +33,7 @@ export default function Issues() {
   const [sortBy, setSortBy] = useState<"key" | "updated" | "logged" | "estimate" | "startDate">("updated");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [advancedFilter, setAdvancedFilter] = useState("all");
+  const [loadScope, setLoadScope] = useState<"me" | "all">("me");
 
   // Sub-task states
   const [subTaskModalOpen, setSubTaskModalOpen] = useState<JiraIssue | null>(null);
@@ -56,12 +57,35 @@ export default function Issues() {
     setError(null);
     try {
       let jql = `project = "${selectedProject}"`;
+      if (loadScope === "me") {
+        jql += ` AND assignee = currentUser()`;
+      }
       if (timeRange === "month") {
         jql += ` AND (updated >= startOfMonth() OR worklogDate >= startOfMonth())`;
       }
       jql += ` ORDER BY updated DESC`;
 
-      const result = await getAllIssuesByJql(jql);
+      let result = await getAllIssuesByJql(jql);
+
+      if (loadScope === "me") {
+        const parentKeys = new Set<string>();
+        result.forEach(issue => {
+          if (issue.fields.parent && issue.fields.parent.key) {
+            parentKeys.add(issue.fields.parent.key);
+          }
+        });
+        
+        const existingKeys = new Set(result.map(i => i.key));
+        const missingParentKeys = Array.from(parentKeys).filter(key => !existingKeys.has(key));
+        
+        if (missingParentKeys.length > 0) {
+          // Split into chunks of 100 if needed, but usually it's small. Jira JQL handles up to thousands of keys.
+          const parentJql = `key in (${missingParentKeys.join(",")})`;
+          const parentIssues = await getAllIssuesByJql(parentJql);
+          result = [...result, ...parentIssues];
+        }
+      }
+
       setIssues(result);
       setPage(1); // Reset trang về 1 mỗi khi load lại
     } catch (err: unknown) {
@@ -70,7 +94,7 @@ export default function Issues() {
     } finally {
       setLoading(false);
     }
-  }, [selectedProject, timeRange, isConfigured]);
+  }, [selectedProject, timeRange, loadScope, isConfigured]);
 
   useEffect(() => { fetchIssues(); }, [fetchIssues]);
 
@@ -237,6 +261,36 @@ export default function Issues() {
                 {p.name}
               </button>
             ))}
+          </div>
+
+          {/* Load Scope Tabs */}
+          <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.03)", padding: 3, borderRadius: 8, border: "1px solid var(--border)" }}>
+            <button
+              className={`btn btn-sm`}
+              style={{
+                background: loadScope === "me" ? "var(--accent-blue)" : "transparent",
+                color: "var(--text-primary)",
+                border: "none",
+                fontSize: 11,
+                padding: "4px 10px"
+              }}
+              onClick={() => setLoadScope("me")}
+            >
+              Của tôi
+            </button>
+            <button
+              className={`btn btn-sm`}
+              style={{
+                background: loadScope === "all" ? "var(--accent-blue)" : "transparent",
+                color: "var(--text-primary)",
+                border: "none",
+                fontSize: 11,
+                padding: "4px 10px"
+              }}
+              onClick={() => setLoadScope("all")}
+            >
+              Tất cả
+            </button>
           </div>
 
           {/* Time Filter Tabs */}
@@ -546,6 +600,30 @@ export default function Issues() {
                 <span className="badge badge-todo">{selectedIssue.fields.priority.name}</span>
               )}
             </div>
+
+            {/* Subtasks */}
+            {selectedIssue.fields.subtasks && selectedIssue.fields.subtasks.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: "var(--text-primary)" }}>
+                  📋 Sub-tasks ({selectedIssue.fields.subtasks.length})
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {selectedIssue.fields.subtasks.map((st) => (
+                    <div key={st.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "var(--bg-card)", borderRadius: 6, border: "1px solid var(--border)" }}>
+                      <span className={getBadgeClass(st.fields.status.name)} style={{ fontSize: 10, padding: "2px 6px" }}>
+                        {st.fields.status.name}
+                      </span>
+                      <a href={`https://20.84.97.109:3033/browse/${st.key}`} target="_blank" rel="noreferrer" style={{ fontSize: 12, fontWeight: 600, color: "var(--accent-blue-light)", textDecoration: "none" }}>
+                        {st.key}
+                      </a>
+                      <span style={{ fontSize: 13, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
+                        {st.fields.summary}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Worklogs */}
             <div>
