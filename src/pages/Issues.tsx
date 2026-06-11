@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers
+  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
@@ -45,6 +45,13 @@ export default function Issues() {
   const [logWorkTime, setLogWorkTime] = useState("");
   const [logWorkComment, setLogWorkComment] = useState("");
   const [loggingWork, setLoggingWork] = useState(false);
+
+  // Resolve bug states
+  const [resolveModalOpen, setResolveModalOpen] = useState<JiraIssue | null>(null);
+  const [resolveResolution, setResolveResolution] = useState("10000");
+  const [resolveOutput, setResolveOutput] = useState("");
+  const [resolveComment, setResolveComment] = useState("");
+  const [resolvingIssue, setResolvingIssue] = useState(false);
 
   const [projectUsers, setProjectUsers] = useState<JiraUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -142,6 +149,49 @@ export default function Issues() {
   const sortIndicator = (col: typeof sortBy) => {
     if (sortBy !== col) return " ↕";
     return sortDir === "asc" ? " ↑" : " ↓";
+  };
+
+  const isBugTask = useCallback((type?: string) => {
+    if (!type) return false;
+    const t = type.toLowerCase();
+    return t === "bug in development" || t === "uat bug" || t === "production bug";
+  }, []);
+
+  const handleResolveClick = async (issue: JiraIssue) => {
+    const status = issue.fields.status.name.toLowerCase();
+    
+    if (status === "open" || status === "mở") {
+      try {
+        setResolvingIssue(true);
+        const transitions = await getTransitions(issue.key);
+        const toInProgress = transitions.find(t => 
+          t.to.name.toLowerCase() === "in progress" || 
+          t.to.name.toLowerCase() === "đang thực hiện"
+        );
+        if (toInProgress) {
+          await transitionIssue(issue.key, toInProgress.id);
+          fetchIssues();
+          
+          if (selectedIssue && (selectedIssue.key === issue.key || selectedIssue.fields.subtasks?.some(s => s.key === issue.key))) {
+             const freshIssue = await getIssue(selectedIssue.key);
+             setSelectedIssue(freshIssue);
+          }
+        } else {
+          alert(`Không tìm thấy transition sang In Progress cho task ${issue.key}`);
+        }
+      } catch (e: any) {
+        alert("Lỗi khi chuyển trạng thái: " + (e.message || "Unknown error"));
+      } finally {
+        setResolvingIssue(false);
+      }
+    } else if (status === "in progress" || status === "đang thực hiện" || status === "đang làm") {
+      setResolveModalOpen(issue as JiraIssue);
+      setResolveResolution("10000");
+      setResolveOutput("");
+      setResolveComment("");
+    } else {
+      alert("Tính năng này chỉ hỗ trợ chuyển từ Open -> In Progress -> Fixed");
+    }
   };
 
   const now = new Date();
@@ -540,6 +590,17 @@ export default function Issues() {
                             + Sub-task
                           </button>
                         )}
+                        {isBugTask(issue.fields.issuetype?.name) && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              style={{ color: "var(--accent-purple)", marginLeft: 4 }}
+                              onClick={() => handleResolveClick(issue)}
+                              disabled={resolvingIssue}
+                              title="Chuyển trạng thái Resolved"
+                            >
+                              ✓ Resolved
+                            </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -635,6 +696,7 @@ export default function Issues() {
                       <span style={{ fontSize: 13, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
                         {st.fields.summary}
                       </span>
+
                       <button
                         className="btn btn-ghost btn-sm"
                         style={{ color: "var(--accent-green)", padding: "2px 8px", fontSize: 11 }}
@@ -938,6 +1000,128 @@ export default function Issues() {
                 }}
               >
                 {loggingWork ? "Đang lưu..." : "Lưu Worklog"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Resolve Bug Modal */}
+      {resolveModalOpen && (
+        <div className="modal-overlay" onClick={() => !resolvingIssue && setResolveModalOpen(null)}>
+          <div className="modal" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Fixed - {resolveModalOpen.key}</div>
+              <button className="modal-close" onClick={() => !resolvingIssue && setResolveModalOpen(null)}>✕</button>
+            </div>
+            
+            <div className="form-group">
+              <label>Resolution *</label>
+              <select 
+                value={resolveResolution} 
+                onChange={e => setResolveResolution(e.target.value)}
+                disabled={resolvingIssue}
+                required
+              >
+                <option value="10000">Done</option>
+                <option value="10001">Won't Do</option>
+                <option value="10002">Duplicate</option>
+                <option value="10003">Cannot Reproduce</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Output *</label>
+              <textarea
+                value={resolveOutput}
+                onChange={(e) => setResolveOutput(e.target.value)}
+                rows={4}
+                placeholder="Nhập thông tin output (Nếu để trống AI sẽ tự sinh)..."
+                disabled={resolvingIssue}
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Comment</label>
+              <textarea
+                value={resolveComment}
+                onChange={(e) => setResolveComment(e.target.value)}
+                rows={4}
+                placeholder="Nhập comment..."
+                disabled={resolvingIssue}
+              />
+            </div>
+            
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setResolveModalOpen(null)} disabled={resolvingIssue}>Cancel</button>
+              <button
+                className="btn btn-primary"
+                disabled={resolvingIssue || !resolveResolution || !resolveOutput.trim()}
+                onClick={async () => {
+                  try {
+                    setResolvingIssue(true);
+                    
+                    // Lấy transition Fixed
+                    const transitions = await getTransitions(resolveModalOpen.key);
+                    const toFixed = transitions.find(t => t.to.name.toLowerCase() === "fixed" || t.to.name.toLowerCase() === "resolved" || t.to.name.toLowerCase() === "done");
+                    if (!toFixed) {
+                      throw new Error("Không tìm thấy transition sang Fixed/Resolved");
+                    }
+
+                    // Tìm ID của custom field Output
+                    const allFields = await getJiraFields();
+                    const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
+                    const outputFieldId = outputField ? outputField.id : "customfield_10000"; // fallback
+
+                    const transitionFields: any = {
+                      resolution: { id: resolveResolution }
+                    };
+                    
+                    let finalOutput = resolveOutput.trim();
+                    if (!finalOutput) {
+                      const geminiKey = localStorage.getItem("gemini_api_key");
+                      if (geminiKey) {
+                        try {
+                          const summary = resolveModalOpen.fields.summary;
+                          const prompt = `Bạn là một lập trình viên. Hãy viết kết quả (Output) ngắn gọn (dưới 15 từ) cho công việc có tiêu đề: "${summary}". Ví dụ: "Đã fixed", "Đã cập nhật theo yêu cầu". Viết bằng tiếng Việt, ngắn gọn.`;
+                          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                          });
+                          if (response.ok) {
+                            const data = await response.json();
+                            finalOutput = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+                          }
+                        } catch (e) {
+                          console.warn("Auto AI output generation failed", e);
+                        }
+                      }
+                      if (!finalOutput) {
+                        finalOutput = `Đã hoàn thành: ${resolveModalOpen.fields.summary}`;
+                      }
+                    }
+
+                    if (outputFieldId) {
+                      transitionFields[outputFieldId] = finalOutput;
+                    }
+
+                    await transitionIssue(resolveModalOpen.key, toFixed.id, transitionFields, resolveComment.trim() || undefined);
+                    
+                    setResolveModalOpen(null);
+                    fetchIssues();
+                    if (selectedIssue && (selectedIssue.key === resolveModalOpen.key || selectedIssue.fields.subtasks?.some(s => s.key === resolveModalOpen.key))) {
+                       const freshIssue = await getIssue(selectedIssue.key);
+                       setSelectedIssue(freshIssue);
+                    }
+                  } catch (e: any) {
+                    alert("Lỗi khi chuyển trạng thái: " + (e.message || "Unknown error"));
+                  } finally {
+                    setResolvingIssue(false);
+                  }
+                }}
+              >
+                {resolvingIssue ? "Đang xử lý..." : "Fixed"}
               </button>
             </div>
           </div>

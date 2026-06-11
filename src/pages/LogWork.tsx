@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { addWorklog, parseTimeToSeconds, getMyIssues, JiraIssue, getTransitions, transitionIssue, getIssue } from "../jiraService";
+import { addWorklog, parseTimeToSeconds, getMyIssues, JiraIssue, getTransitions, transitionIssue, getIssue, getJiraFields } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
 interface Toast { id: number; type: "success" | "error"; msg: string; }
@@ -159,7 +159,12 @@ export default function LogWork() {
       );
 
       if (toResolved) {
-        await transitionIssue(key, toResolved.id);
+        const allFields = await getJiraFields();
+        const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
+        const transitionFields: any = { resolution: { id: "10000" } };
+        if (outputField) transitionFields[outputField.id] = "Tự động hoàn thành";
+
+        await transitionIssue(key, toResolved.id, transitionFields);
         addToast("success", `🔄 Đã chuyển ${key} sang trạng thái: ${toResolved.to.name}`);
         // Lấy lại danh sách transition tiếp theo
         transitions = await getTransitions(key);
@@ -172,7 +177,12 @@ export default function LogWork() {
       );
 
       if (toClosed) {
-        await transitionIssue(key, toClosed.id);
+        const allFields = await getJiraFields();
+        const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
+        const transitionFields: any = { resolution: { id: "10000" } };
+        if (outputField) transitionFields[outputField.id] = "Tự động hoàn thành";
+
+        await transitionIssue(key, toClosed.id, transitionFields);
         addToast("success", `🔒 Đã đóng (Closed) issue ${key} thành công!`);
       }
     } catch (transErr: any) {

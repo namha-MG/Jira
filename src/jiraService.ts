@@ -492,11 +492,32 @@ export async function getTransitions(issueKey: string): Promise<{ id: string; na
   return res.data.transitions;
 }
 
+let cachedFields: any[] | null = null;
+export async function getJiraFields(): Promise<any[]> {
+  if (cachedFields) return cachedFields;
+  const res = await jiraApi.get("/field");
+  cachedFields = res.data;
+  return cachedFields;
+}
+
 /** Thực hiện chuyển đổi trạng thái (Transition) cho một Issue */
-export async function transitionIssue(issueKey: string, transitionId: string): Promise<void> {
-  await jiraApi.post(`/issue/${issueKey}/transitions`, {
+export async function transitionIssue(issueKey: string, transitionId: string, transitionFields?: any, comment?: string): Promise<void> {
+  const payload: any = {
     transition: { id: transitionId },
-  });
+  };
+  if (transitionFields) {
+    payload.fields = transitionFields;
+  }
+  if (comment) {
+    payload.update = {
+      comment: [
+        {
+          add: { body: comment }
+        }
+      ]
+    };
+  }
+  await jiraApi.post(`/issue/${issueKey}/transitions`, payload);
 }
 
 /** Tìm ngày bắt đầu tiếp theo dựa trên task cuối cùng đã tạo/được gán */
