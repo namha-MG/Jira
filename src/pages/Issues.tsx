@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue
+  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
@@ -37,8 +37,14 @@ export default function Issues() {
 
   // Sub-task states
   const [subTaskModalOpen, setSubTaskModalOpen] = useState<JiraIssue | null>(null);
-  const [subTasks, setSubTasks] = useState([{ summary: "", estimate: "" }]);
+  const [subTasks, setSubTasks] = useState([{ summary: "", estimate: "", assigneeName: "" }]);
   const [creatingSubTask, setCreatingSubTask] = useState(false);
+
+  // Log work states
+  const [logWorkModalOpen, setLogWorkModalOpen] = useState<{ key: string; summary: string } | null>(null);
+  const [logWorkTime, setLogWorkTime] = useState("");
+  const [logWorkComment, setLogWorkComment] = useState("");
+  const [loggingWork, setLoggingWork] = useState(false);
 
   useEffect(() => {
     setStatusFilter("all");
@@ -517,7 +523,7 @@ export default function Issues() {
                             style={{ color: "var(--accent-blue)", marginLeft: 4 }}
                             onClick={() => {
                               setSubTaskModalOpen(issue);
-                              setSubTasks([{ summary: "", estimate: "" }]);
+                              setSubTasks([{ summary: "", estimate: "", assigneeName: "" }]);
                             }}
                             title="Tạo Sub-task"
                           >
@@ -619,6 +625,18 @@ export default function Issues() {
                       <span style={{ fontSize: 13, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
                         {st.fields.summary}
                       </span>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        style={{ color: "var(--accent-green)", padding: "2px 8px", fontSize: 11 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLogWorkModalOpen({ key: st.key, summary: st.fields.summary });
+                          setLogWorkTime("");
+                          setLogWorkComment("");
+                        }}
+                      >
+                        + Log work
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -715,6 +733,29 @@ export default function Issues() {
                     />
                   </div>
                   
+                  <div className="form-group" style={{ width: 140, margin: 0 }}>
+                    {i === 0 && <label>Assignee</label>}
+                    <select
+                      value={st.assigneeName || ""}
+                      onChange={(e) => {
+                        const newST = [...subTasks];
+                        newST[i].assigneeName = e.target.value;
+                        setSubTasks(newST);
+                      }}
+                      disabled={creatingSubTask}
+                    >
+                      <option value="">-- Tôi --</option>
+                      {uniqueAssignees.map((a) => {
+                        const userKey = a.name || a.accountId || a.emailAddress;
+                        return (
+                          <option key={userKey} value={userKey}>
+                            {a.displayName}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                  
                   <div style={{ marginTop: i === 0 ? 24 : 4 }}>
                     <button 
                       className="btn btn-ghost btn-sm" 
@@ -723,7 +764,7 @@ export default function Issues() {
                         if (subTasks.length > 1) {
                           setSubTasks(subTasks.filter((_, idx) => idx !== i));
                         } else {
-                          setSubTasks([{ summary: "", estimate: "" }]);
+                          setSubTasks([{ summary: "", estimate: "", assigneeName: "" }]);
                         }
                       }}
                       disabled={creatingSubTask}
@@ -740,7 +781,7 @@ export default function Issues() {
               <button 
                 className="btn btn-ghost btn-sm" 
                 style={{ color: "var(--accent-blue)", border: "1px dashed var(--accent-blue)" }}
-                onClick={() => setSubTasks([...subTasks, { summary: "", estimate: "" }])}
+                onClick={() => setSubTasks([...subTasks, { summary: "", estimate: "", assigneeName: "" }])}
                 disabled={creatingSubTask}
               >
                 + Thêm Sub-task
@@ -764,7 +805,8 @@ export default function Issues() {
                         parentKey: subTaskModalOpen.key,
                         projectKey: subTaskModalOpen.fields.project.key,
                         summary: st.summary.trim(),
-                        originalEstimate: st.estimate.trim() || undefined
+                        originalEstimate: st.estimate.trim() || undefined,
+                        assigneeName: st.assigneeName || undefined
                       });
                     }
                     setSubTaskModalOpen(null);
@@ -783,6 +825,109 @@ export default function Issues() {
                 }}
               >
                 {creatingSubTask ? "Đang tạo..." : `Tạo ${subTasks.filter(st => st.summary.trim()).length} Sub-task`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Log Work Modal */}
+      {logWorkModalOpen && (
+        <div className="modal-overlay" onClick={() => !loggingWork && setLogWorkModalOpen(null)}>
+          <div className="modal" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Log Work cho {logWorkModalOpen.key}</div>
+              <button className="modal-close" onClick={() => !loggingWork && setLogWorkModalOpen(null)}>✕</button>
+            </div>
+            <div className="form-group">
+              <label>Thời gian (VD: 2h, 30m, 1d) *</label>
+              <input
+                type="text"
+                value={logWorkTime}
+                onChange={(e) => setLogWorkTime(e.target.value)}
+                placeholder="2h 30m"
+                disabled={loggingWork}
+                autoFocus
+              />
+            </div>
+            <div className="form-group">
+              <label>Ghi chú (Tùy chọn)</label>
+              <textarea
+                value={logWorkComment}
+                onChange={(e) => setLogWorkComment(e.target.value)}
+                rows={3}
+                placeholder="Đã làm..."
+                disabled={loggingWork}
+              />
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setLogWorkModalOpen(null)} disabled={loggingWork}>Hủy</button>
+              <button
+                className="btn btn-primary"
+                disabled={!logWorkTime.trim() || loggingWork}
+                onClick={async () => {
+                  try {
+                    setLoggingWork(true);
+                    const timeRegex = /([0-9.]+)([wdhm])/g;
+                    let totalSeconds = 0;
+                    let match;
+                    while ((match = timeRegex.exec(logWorkTime.toLowerCase())) !== null) {
+                      const val = parseFloat(match[1]);
+                      const unit = match[2];
+                      if (unit === "w") totalSeconds += val * 5 * 8 * 3600;
+                      else if (unit === "d") totalSeconds += val * 8 * 3600;
+                      else if (unit === "h") totalSeconds += val * 3600;
+                      else if (unit === "m") totalSeconds += val * 60;
+                    }
+                    if (totalSeconds === 0) {
+                      throw new Error("Định dạng thời gian không đúng. VD: 2h, 30m");
+                    }
+                    let finalComment = logWorkComment.trim();
+                    if (!finalComment) {
+                      const geminiKey = localStorage.getItem("gemini_api_key");
+                      if (geminiKey) {
+                        try {
+                          const summary = logWorkModalOpen.summary;
+                          const prompt = `Bạn là một kỹ sư phần mềm chuyên nghiệp. Hãy viết 1 câu ngắn gọn (dưới 15 từ) ghi chú lại công việc đã thực hiện cho task Jira có tiêu đề: "${summary}". Ví dụ: "Đã hoàn thành tối ưu hóa truy vấn SQL và sửa lỗi bộ lọc". Viết bằng tiếng Việt, trực tiếp, bắt đầu bằng từ hành động như "Hoàn thành...", "Cải tiến...", "Tối ưu...", "Sửa lỗi...", không dài dòng, không có phần giới thiệu, không thêm bất kỳ định dạng markdown hay dấu ngoặc kép nào xung quanh.`;
+                          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                          });
+                          if (response.ok) {
+                            const data = await response.json();
+                            finalComment = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+                          } else {
+                            console.warn(`Auto AI comment failed: HTTP ${response.status}`);
+                          }
+                        } catch (e) {
+                          console.warn("Auto AI generation failed, falling back to static template", e);
+                        }
+                      }
+
+                      if (!finalComment) {
+                        finalComment = `Thực hiện công việc: ${logWorkModalOpen.summary}`;
+                      }
+                    }
+
+                    await addWorklog(logWorkModalOpen.key, {
+                      timeSpentSeconds: totalSeconds,
+                      comment: finalComment,
+                    });
+                    
+                    setLogWorkModalOpen(null);
+                    // Refresh issue details
+                    if (selectedIssue && selectedIssue.key === selectedIssue.key) {
+                      openDetail(selectedIssue);
+                    }
+                  } catch (e: any) {
+                    alert("Lỗi khi log work: " + (e.message || "Unknown error"));
+                  } finally {
+                    setLoggingWork(false);
+                  }
+                }}
+              >
+                {loggingWork ? "Đang lưu..." : "Lưu Worklog"}
               </button>
             </div>
           </div>
