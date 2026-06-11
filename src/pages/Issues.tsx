@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog
+  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
@@ -46,12 +46,24 @@ export default function Issues() {
   const [logWorkComment, setLogWorkComment] = useState("");
   const [loggingWork, setLoggingWork] = useState(false);
 
+  const [projectUsers, setProjectUsers] = useState<JiraUser[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+
+  const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
+
   useEffect(() => {
     setStatusFilter("all");
     setAssigneeFilter("all");
-  }, [selectedProject]);
-
-  const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
+    
+    // Fetch all assignable users for the selected project
+    if (isConfigured) {
+      setLoadingUsers(true);
+      getAssignableUsers(selectedProject)
+        .then(users => setProjectUsers(users))
+        .catch(e => console.warn("Lỗi khi tải danh sách user của dự án", e))
+        .finally(() => setLoadingUsers(false));
+    }
+  }, [selectedProject, isConfigured]);
 
   // Pagination states
   const [page, setPage] = useState(1);
@@ -211,11 +223,9 @@ export default function Issues() {
   const paginatedFiltered = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const uniqueStatuses = [...new Set(issues.map((i) => i.fields.status.name))];
+  // Filter out duplicates in projectUsers (just in case)
   const uniqueAssignees = [...new Map(
-    issues
-      .map((i) => i.fields.assignee)
-      .filter((a): a is JiraUser => a !== null && a !== undefined)
-      .map((a) => [a.name || a.accountId || a.emailAddress, a])
+    projectUsers.map((a) => [a.name || a.accountId || a.emailAddress, a])
   ).values()];
 
   if (!isConfigured) {
@@ -742,9 +752,9 @@ export default function Issues() {
                         newST[i].assigneeName = e.target.value;
                         setSubTasks(newST);
                       }}
-                      disabled={creatingSubTask}
+                      disabled={creatingSubTask || loadingUsers}
                     >
-                      <option value="">-- Tôi --</option>
+                      <option value="">{loadingUsers ? "Đang tải..." : "-- Tôi --"}</option>
                       {uniqueAssignees.map((a) => {
                         const userKey = a.name || a.accountId || a.emailAddress;
                         return (
