@@ -603,6 +603,8 @@ textarea { resize: vertical; min-height: 80px; }
   padding: 28px;
   width: 100%;
   max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
   box-shadow: var(--shadow-lg);
   animation: slideUp 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }

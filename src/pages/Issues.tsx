@@ -590,7 +590,8 @@ export default function Issues() {
                             + Sub-task
                           </button>
                         )}
-                        {isBugTask(issue.fields.issuetype?.name) && (
+                        {isBugTask(issue.fields.issuetype?.name) && 
+                         !["fixed", "resolved", "done", "closed", "đóng", "hoàn thành"].some(s => issue.fields.status?.name?.toLowerCase().includes(s)) && (
                             <button
                               className="btn btn-ghost btn-sm"
                               style={{ color: "var(--accent-purple)", marginLeft: 4 }}
