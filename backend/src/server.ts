@@ -105,6 +105,157 @@ app.post("/api/jobs/trigger", async (req, res) => {
   }
 });
 
+// ─── TEAMS CRUD ──────────────────────────────────────────────────────────────
+
+app.get("/api/teams", async (req, res) => {
+  const client = new Client({ connectionString: POSTGRES_URL });
+  try {
+    await client.connect();
+    const dbRes = await client.query(`
+      SELECT t.*, COUNT(tm.id)::int AS member_count
+      FROM teams t
+      LEFT JOIN team_members tm ON t.id = tm.team_id
+      GROUP BY t.id
+      ORDER BY t.created_at DESC
+    `);
+    res.json(dbRes.rows);
+  } catch (err) {
+    console.error("Error fetching teams:", err);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    await client.end();
+  }
+});
+
+app.post("/api/teams", async (req, res) => {
+  const { name, description, project_key } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: "name is required" });
+  const client = new Client({ connectionString: POSTGRES_URL });
+  try {
+    await client.connect();
+    const dbRes = await client.query(
+      `INSERT INTO teams (name, description, project_key) VALUES ($1, $2, $3) RETURNING *`,
+      [name.trim(), description || "", project_key || ""]
+    );
+    res.json(dbRes.rows[0]);
+  } catch (err) {
+    console.error("Error creating team:", err);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    await client.end();
+  }
+});
+
+app.put("/api/teams/:id", async (req, res) => {
+  const { name, description, project_key } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: "name is required" });
+  const client = new Client({ connectionString: POSTGRES_URL });
+  try {
+    await client.connect();
+    const dbRes = await client.query(
+      `UPDATE teams SET name=$1, description=$2, project_key=$3 WHERE id=$4 RETURNING *`,
+      [name.trim(), description || "", project_key || "", req.params.id]
+    );
+    if (dbRes.rowCount === 0) return res.status(404).json({ error: "Team not found" });
+    res.json(dbRes.rows[0]);
+  } catch (err) {
+    console.error("Error updating team:", err);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    await client.end();
+  }
+});
+
+app.delete("/api/teams/:id", async (req, res) => {
+  const client = new Client({ connectionString: POSTGRES_URL });
+  try {
+    await client.connect();
+    await client.query("DELETE FROM teams WHERE id=$1", [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error deleting team:", err);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    await client.end();
+  }
+});
+
+// ─── TEAM MEMBERS CRUD ───────────────────────────────────────────────────────
+
+app.get("/api/teams/:id/members", async (req, res) => {
+  const client = new Client({ connectionString: POSTGRES_URL });
+  try {
+    await client.connect();
+    const dbRes = await client.query(
+      "SELECT * FROM team_members WHERE team_id=$1 ORDER BY created_at ASC",
+      [req.params.id]
+    );
+    res.json(dbRes.rows);
+  } catch (err) {
+    console.error("Error fetching members:", err);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    await client.end();
+  }
+});
+
+app.post("/api/teams/:id/members", async (req, res) => {
+  const { jira_username, display_name, role } = req.body;
+  if (!jira_username?.trim()) return res.status(400).json({ error: "jira_username is required" });
+  const client = new Client({ connectionString: POSTGRES_URL });
+  try {
+    await client.connect();
+    const dbRes = await client.query(
+      `INSERT INTO team_members (team_id, jira_username, display_name, role)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [req.params.id, jira_username.trim(), display_name || "", role || ""]
+    );
+    res.json(dbRes.rows[0]);
+  } catch (err: any) {
+    if (err.code === "23505") return res.status(409).json({ error: "Thành viên đã tồn tại trong team" });
+    console.error("Error adding member:", err);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    await client.end();
+  }
+});
+
+app.put("/api/teams/:id/members/:memberId", async (req, res) => {
+  const { jira_username, display_name, role } = req.body;
+  if (!jira_username?.trim()) return res.status(400).json({ error: "jira_username is required" });
+  const client = new Client({ connectionString: POSTGRES_URL });
+  try {
+    await client.connect();
+    const dbRes = await client.query(
+      `UPDATE team_members SET jira_username=$1, display_name=$2, role=$3
+       WHERE id=$4 AND team_id=$5 RETURNING *`,
+      [jira_username.trim(), display_name || "", role || "", req.params.memberId, req.params.id]
+    );
+    if (dbRes.rowCount === 0) return res.status(404).json({ error: "Member not found" });
+    res.json(dbRes.rows[0]);
+  } catch (err: any) {
+    if (err.code === "23505") return res.status(409).json({ error: "Tên đăng nhập đã tồn tại trong team" });
+    console.error("Error updating member:", err);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    await client.end();
+  }
+});
+
+app.delete("/api/teams/:id/members/:memberId", async (req, res) => {
+  const client = new Client({ connectionString: POSTGRES_URL });
+  try {
+    await client.connect();
+    await client.query("DELETE FROM team_members WHERE id=$1 AND team_id=$2", [req.params.memberId, req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error deleting member:", err);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    await client.end();
+  }
+});
+
 // Serve frontend static files
 app.use(express.static(path.join(process.cwd(), "public")));
 
