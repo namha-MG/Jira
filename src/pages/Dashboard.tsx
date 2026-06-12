@@ -191,7 +191,14 @@ export default function Dashboard() {
              transitionFields[outputField.id] = aiOutput;
           }
 
-          await transitionIssue(key, toClosed.id, transitionFields);
+          try {
+            await transitionIssue(key, toClosed.id, transitionFields);
+          } catch (e) {
+            console.warn(`Chuyển sang Closed với fields thất bại cho ${key}, thử lại không dùng fields. Lỗi:`, e);
+            await transitionIssue(key, toClosed.id);
+          }
+        } else {
+          console.warn(`Không tìm thấy transition Closed cho ${key}. Các transition hiện có:`, transitions.map(t => t.name));
         }
 
         successCount++;
