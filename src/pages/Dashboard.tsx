@@ -68,16 +68,23 @@ export default function Dashboard() {
       const logged = i.fields.timetracking?.timeSpentSeconds || 0;
       const remain = i.fields.timetracking?.remainingEstimateSeconds || 0;
 
+      const isSubTask = i.fields.issuetype?.name?.toLowerCase().includes("sub-task") || i.fields.issuetype?.name?.toLowerCase().includes("subtask");
+
       // Tránh các task đã hoàn thành/hủy bỏ
-      const isCompleted =
+      const isClosedOrCancelled =
         statusName.includes("close") ||
-        statusName.includes("resolve") ||
         statusName.includes("cancel") ||
-        statusName.includes("done") ||
         statusName.includes("hủy") ||
-        statusName.includes("đóng") ||
+        statusName.includes("đóng");
+
+      const isResolved = 
+        statusName.includes("resolve") ||
+        statusName.includes("done") ||
         statusName.includes("hoàn thành") ||
         statusName.includes("đã giải quyết");
+
+      // Với Sub-task, Resolved chưa phải là kết thúc, cho phép tiếp tục chạy auto close để chuyển sang Closed
+      const isCompleted = isSubTask ? isClosedOrCancelled : (isClosedOrCancelled || isResolved);
 
       return est > 0 && logged >= est && remain === 0 && !isCompleted;
     });
@@ -109,36 +116,42 @@ export default function Dashboard() {
 
         const inprogressKeywords = ["in progress", "đang thực hiện", "đang làm", "to do", "cần làm"];
         const resolvedKeywords = ["resolved", "done", "đã giải quyết", "hoàn thành", "ready for test", "resolved / done"];
-        const closedKeywords = ["closed", "đóng"];
+        const closedKeywords = ["closed", "đóng", "close"];
 
-        // 1. Chuyển sang In Progress (nếu có)
-        const toInProgress = transitions.find(t => 
-          inprogressKeywords.includes(t.to.name.toLowerCase()) || 
-          inprogressKeywords.some(kw => t.name.toLowerCase().includes(kw))
-        );
-        if (toInProgress) {
-          setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toInProgress.to.name}`);
-          await transitionIssue(key, toInProgress.id);
-          transitions = await getTransitions(key);
-        }
+        const currentStatusName = task.fields.status.name.toLowerCase();
+        const isAlreadyResolved = resolvedKeywords.some(kw => currentStatusName.includes(kw));
+        const isAlreadyClosed = closedKeywords.some(kw => currentStatusName.includes(kw));
 
-        // 2. Chuyển sang Resolved/Hoàn thành
-        const toResolved = transitions.find(t => 
-          resolvedKeywords.includes(t.to.name.toLowerCase()) || 
-          resolvedKeywords.some(kw => t.name.toLowerCase().includes(kw))
-        );
-        if (toResolved) {
-          setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toResolved.to.name}`);
-          const allFields = await getJiraFields();
-          const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
-          const transitionFields: any = { resolution: { id: "10000" } };
-          if (outputField) {
-             const aiOutput = await generateAiOutput(task.fields.summary);
-             transitionFields[outputField.id] = aiOutput;
+        if (!isAlreadyResolved && !isAlreadyClosed) {
+          // 1. Chuyển sang In Progress (nếu có)
+          const toInProgress = transitions.find(t => 
+            inprogressKeywords.includes(t.to.name.toLowerCase()) || 
+            inprogressKeywords.some(kw => t.name.toLowerCase().includes(kw))
+          );
+          if (toInProgress) {
+            setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toInProgress.to.name}`);
+            await transitionIssue(key, toInProgress.id);
+            transitions = await getTransitions(key);
           }
 
-          await transitionIssue(key, toResolved.id, transitionFields);
-          transitions = await getTransitions(key);
+          // 2. Chuyển sang Resolved/Hoàn thành
+          const toResolved = transitions.find(t => 
+            resolvedKeywords.includes(t.to.name.toLowerCase()) || 
+            resolvedKeywords.some(kw => t.name.toLowerCase().includes(kw))
+          );
+          if (toResolved) {
+            setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toResolved.to.name}`);
+            const allFields = await getJiraFields();
+            const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
+            const transitionFields: any = { resolution: { id: "10000" } };
+            if (outputField) {
+               const aiOutput = await generateAiOutput(task.fields.summary);
+               transitionFields[outputField.id] = aiOutput;
+            }
+
+            await transitionIssue(key, toResolved.id, transitionFields);
+            transitions = await getTransitions(key);
+          }
         }
 
         // 2.5 Chuyển sang Commit (nếu có) - CHỈ DÀNH CHO BUG
