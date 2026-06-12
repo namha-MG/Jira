@@ -327,7 +327,7 @@ export async function getProjects(): Promise<{ key: string; name: string; id: st
 export async function getAssignableUsers(projectKey: string): Promise<JiraUser[]> {
   try {
     const res = await jiraApi.get("/user/assignable/search", {
-      params: { project: projectKey }
+      params: { project: projectKey, maxResults: 1000 }
     });
     return res.data;
   } catch (err) {
