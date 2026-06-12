@@ -63,6 +63,24 @@ async function init() {
         message TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS teams (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT DEFAULT '',
+        project_key VARCHAR(50) DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS team_members (
+        id SERIAL PRIMARY KEY,
+        team_id INT REFERENCES teams(id) ON DELETE CASCADE,
+        jira_username VARCHAR(255) NOT NULL,
+        display_name VARCHAR(255) DEFAULT '',
+        role VARCHAR(100) DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(team_id, jira_username)
+      );
     `;
     await appClient.query(createTableQuery);
     console.log("Table jira_app_configs created/verified.");
