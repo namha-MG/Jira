@@ -134,6 +134,14 @@ export default function Dashboard() {
             transitions = await getTransitions(key);
           }
 
+          const getJiraErrorMsg = (err: any) => {
+            const data = err?.response?.data;
+            if (!data) return err.message;
+            if (data.errorMessages && data.errorMessages.length > 0) return data.errorMessages[0];
+            if (data.errors) return JSON.stringify(data.errors);
+            return err.message;
+          };
+
           // 2. Chuyển sang Resolved/Hoàn thành
           const toResolved = transitions.find(t => 
             resolvedKeywords.includes(t.to.name.toLowerCase()) || 
@@ -149,7 +157,12 @@ export default function Dashboard() {
                transitionFields[outputField.id] = aiOutput;
             }
 
-            await transitionIssue(key, toResolved.id, transitionFields);
+            try {
+              await transitionIssue(key, toResolved.id, transitionFields);
+            } catch (e) {
+              console.warn(`Chuyển sang Resolved với fields thất bại cho ${key}. Lỗi:`, getJiraErrorMsg(e));
+              await transitionIssue(key, toResolved.id);
+            }
             transitions = await getTransitions(key);
           }
         }
@@ -193,12 +206,29 @@ export default function Dashboard() {
 
           try {
             await transitionIssue(key, toClosed.id, transitionFields);
-          } catch (e) {
-            console.warn(`Chuyển sang Closed với fields thất bại cho ${key}, thử lại không dùng fields. Lỗi:`, e);
-            await transitionIssue(key, toClosed.id);
+          } catch (e: any) {
+            const data = e?.response?.data;
+            let msg = e.message;
+            if (data?.errorMessages?.length) msg = data.errorMessages[0];
+            else if (data?.errors) msg = JSON.stringify(data.errors);
+            console.warn(`Chuyển sang Closed với fields thất bại cho ${key}, thử lại không dùng fields. Lỗi: ${msg}`);
+            
+            try {
+              await transitionIssue(key, toClosed.id);
+            } catch (innerE: any) {
+              const innerData = innerE?.response?.data;
+              let innerMsg = innerE.message;
+              if (innerData?.errorMessages?.length) innerMsg = innerData.errorMessages[0];
+              else if (innerData?.errors) innerMsg = JSON.stringify(innerData.errors);
+              
+              alert(`Không thể chuyển ${key} sang Closed. Lỗi Jira: ${innerMsg}`);
+              throw innerE;
+            }
           }
         } else {
-          console.warn(`Không tìm thấy transition Closed cho ${key}. Các transition hiện có:`, transitions.map(t => t.name));
+          const avail = transitions.map(t => t.name).join(", ");
+          console.warn(`Không tìm thấy transition Closed cho ${key}. Các transition hiện có:`, avail);
+          alert(`Task ${key} không có bước nào để chuyển sang Closed!\nCác bước hiện có: ${avail || "Không có bước nào"}`);
         }
 
         successCount++;
