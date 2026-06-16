@@ -513,6 +513,21 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
     return Object.values(map).sort((a, b) => b.timeSpent - a.timeSpent);
   }, [statTasks]);
 
+  const statTasksByMember = React.useMemo(() => {
+    const groups: Record<string, { member: { displayName: string; username: string }, issues: JiraIssue[] }> = {};
+    statTasks.forEach(issue => {
+      const a = issue.fields.assignee;
+      const username = a?.name || a?.accountId || a?.emailAddress || "unassigned";
+      const displayName = a?.displayName || "Chưa assign";
+      
+      if (!groups[username]) {
+        groups[username] = { member: { displayName, username }, issues: [] };
+      }
+      groups[username].issues.push(issue);
+    });
+    return Object.values(groups).sort((a, b) => b.issues.length - a.issues.length);
+  }, [statTasks]);
+
   const teamStats = React.useMemo(() => {
     let uatBugs = 0;
     let prodBugs = 0;
@@ -1321,8 +1336,28 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
               {statError && <div style={{ color: "var(--accent-red)", fontSize: 12, marginTop: 8 }}>⚠️ {statError}</div>}
             </div>
 
-            {/* Team Dashboard Metrics (The cool charts) */}
-            {statTasks.length > 0 && <TeamDashboardMetrics issues={statTasks} />}
+            {/* Team Dashboard Metrics (Per Member) */}
+            {statTasksByMember.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+                {statTasksByMember.map(group => (
+                  <div key={group.member.username} style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 16, padding: "20px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid var(--border)" }}>
+                      <div style={{ width: 40, height: 40, borderRadius: 20, background: "rgba(79, 142, 247, 0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>
+                        👤
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 18, fontWeight: 700 }}>{group.member.displayName}</div>
+                        <div style={{ fontSize: 13, color: "var(--text-muted)" }}>@{group.member.username}</div>
+                      </div>
+                      <div style={{ marginLeft: "auto", background: "rgba(16, 185, 129, 0.1)", color: "var(--accent-green)", padding: "4px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600 }}>
+                        {group.issues.length} Issues
+                      </div>
+                    </div>
+                    <TeamDashboardMetrics issues={group.issues} member={group.member} />
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Effort summary list */}
             {statTasks.length > 0 && effortByMember().length > 0 && (

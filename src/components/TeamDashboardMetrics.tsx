@@ -7,6 +7,7 @@ import { JiraIssue, formatSeconds } from "../jiraService";
 
 interface TeamDashboardMetricsProps {
   issues: JiraIssue[];
+  member?: { displayName: string; username: string };
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -25,7 +26,7 @@ function getProgressClass(pct: number): string {
   return "good";
 }
 
-export default function TeamDashboardMetrics({ issues }: TeamDashboardMetricsProps) {
+export default function TeamDashboardMetrics({ issues, member }: TeamDashboardMetricsProps) {
   const totalEstimated = issues.reduce((s, i) => s + (i.fields.timetracking?.originalEstimateSeconds || 0), 0);
   
   const totalLogged = issues.reduce((sum, issue) => {
@@ -155,7 +156,7 @@ export default function TeamDashboardMetrics({ issues }: TeamDashboardMetricsPro
 
       {/* Overall progress */}
       <div className="chart-card" style={{ marginBottom: 16 }}>
-        <div className="chart-title">Tiến độ Log Work tổng thể (Team)</div>
+        <div className="chart-title">Tiến độ Log Work tổng thể ({member ? member.displayName : "Team"})</div>
         <div className="chart-subtitle">Estimate vs. Logged ({logPct}% hoàn thành)</div>
         <div className="progress-bar-wrap" style={{ height: 10, marginBottom: 8 }}>
           <div
@@ -173,7 +174,7 @@ export default function TeamDashboardMetrics({ issues }: TeamDashboardMetricsPro
       <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 16, marginBottom: 16 }}>
         {/* Weekly bar chart */}
         <div className="chart-card">
-          <div className="chart-title">Nỗ lực log work của Team (Tuần này)</div>
+          <div className="chart-title">Nỗ lực log work của {member ? member.displayName : "Team"} (Tuần này)</div>
           <div className="chart-subtitle">Thời gian đã log theo từng ngày (giờ)</div>
           <div style={{ marginTop: 12 }}>
             <ResponsiveContainer width="100%" height={180}>
@@ -195,7 +196,7 @@ export default function TeamDashboardMetrics({ issues }: TeamDashboardMetricsPro
         {/* Weekly comparison card */}
         <div className="chart-card" style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
           <div>
-            <div className="chart-title">So sánh hiệu suất tuần (Team)</div>
+            <div className="chart-title">So sánh hiệu suất tuần ({member ? member.displayName : "Team"})</div>
             <div className="chart-subtitle">So sánh nỗ lực tuần này với tuần trước</div>
           </div>
 
@@ -237,9 +238,9 @@ export default function TeamDashboardMetrics({ issues }: TeamDashboardMetricsPro
             </div>
             <div>
               {thisWeekTotalSeconds >= lastWeekTotalSeconds ? (
-                <div><strong>Tốt!</strong> Team log work bằng hoặc cao hơn tuần trước.</div>
+                <div><strong>Tốt!</strong> {member ? member.displayName : "Team"} log work bằng hoặc cao hơn tuần trước.</div>
               ) : (
-                <div><strong>Nhắc nhở:</strong> Nhắc nhở thành viên log work đầy đủ nhé.</div>
+                <div><strong>Nhắc nhở:</strong> {member ? "Nhắc nhở " + member.displayName : "Nhắc nhở thành viên"} log work đầy đủ nhé.</div>
               )}
             </div>
           </div>
@@ -250,7 +251,7 @@ export default function TeamDashboardMetrics({ issues }: TeamDashboardMetricsPro
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16, marginBottom: 16 }}>
         {/* Pie chart by status */}
         <div className="chart-card">
-          <div className="chart-title">Trạng thái Issues (Team)</div>
+          <div className="chart-title">Trạng thái Issues ({member ? member.displayName : "Team"})</div>
           <div className="chart-subtitle">Phân bổ theo status</div>
           <ResponsiveContainer width="100%" height={180}>
             <PieChart>
