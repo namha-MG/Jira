@@ -442,7 +442,13 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
     const filtered = taskMemberFilter === "all" ? taskMembers : taskMembers.filter(m => m.jira_username === taskMemberFilter);
     if (filtered.length === 0) { setTasksError("Không có thành viên nào được chọn."); return; }
 
-    const usernames = filtered.map(m => `"${m.jira_username}"`).join(", ");
+    const usernamesArray: string[] = [];
+    filtered.forEach(m => {
+      const u = m.jira_username;
+      usernamesArray.push(`"${u}"`);
+      if (u.includes("@")) usernamesArray.push(`"${u.split("@")[0]}"`);
+    });
+    const usernames = usernamesArray.join(", ");
     const projectFilter = taskProjects.length > 0
       ? `project in (${taskProjects.map(p => `"${p}"`).join(", ")}) AND `
       : "";
@@ -471,7 +477,13 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
     const filtered = statMemberFilter === "all" ? statMembers : statMembers.filter(m => m.jira_username === statMemberFilter);
     if (filtered.length === 0) { setStatError("Không có thành viên nào được chọn."); return; }
 
-    const usernames = filtered.map(m => `"${m.jira_username}"`).join(", ");
+    const usernamesArray: string[] = [];
+    filtered.forEach(m => {
+      const u = m.jira_username;
+      usernamesArray.push(`"${u}"`);
+      if (u.includes("@")) usernamesArray.push(`"${u.split("@")[0]}"`);
+    });
+    const usernames = usernamesArray.join(", ");
     const projectFilter = statProjects.length > 0
       ? `project in (${statProjects.map(p => `"${p}"`).join(", ")}) AND `
       : "";
@@ -530,13 +542,29 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
 
     statTasks.forEach(issue => {
       const a = issue.fields.assignee;
-      const username = a?.name || a?.accountId || a?.emailAddress || "unassigned";
-      const displayName = a?.displayName || "Chưa assign";
+      const jName = a?.name;
+      const jAccount = a?.accountId;
+      const jEmail = a?.emailAddress;
       
-      if (!groups[username]) {
-        groups[username] = { member: { displayName, username }, issues: [] };
+      let matchedUsername = jName || jAccount || jEmail || "unassigned";
+      let displayName = a?.displayName || "Chưa assign";
+      
+      const found = relevantMembers.find(m => {
+        const u = m.jira_username;
+        return u === jName || u === jAccount || u === jEmail ||
+          (jEmail && u === jEmail.split('@')[0]) ||
+          (jName && u.split('@')[0] === jName);
+      });
+      
+      if (found) {
+        matchedUsername = found.jira_username;
+        displayName = found.display_name || displayName;
       }
-      groups[username].issues.push(issue);
+      
+      if (!groups[matchedUsername]) {
+        groups[matchedUsername] = { member: { displayName, username: matchedUsername }, issues: [] };
+      }
+      groups[matchedUsername].issues.push(issue);
     });
     return Object.values(groups).sort((a, b) => b.issues.length - a.issues.length);
   }, [statTasks, statMembers, statMemberFilter]);
