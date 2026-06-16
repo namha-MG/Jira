@@ -589,7 +589,11 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       }
       
       estimateSecs += t.fields.timetracking?.originalEstimateSeconds || 0;
-      loggedSecs += t.fields.timetracking?.timeSpentSeconds || 0;
+      
+      const statusName = t.fields.status?.name?.toLowerCase() || "";
+      if (statusName.includes("close") || statusName.includes("đóng") || statusName.includes("done") || statusName.includes("resolved")) {
+        loggedSecs += t.fields.timetracking?.timeSpentSeconds || 0;
+      }
     });
 
     return { uatBugs, prodBugs, tasks, estimateSecs, loggedSecs };

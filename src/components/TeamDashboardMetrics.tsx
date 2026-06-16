@@ -30,6 +30,10 @@ export default function TeamDashboardMetrics({ issues, member }: TeamDashboardMe
   const totalEstimated = issues.reduce((s, i) => s + (i.fields.timetracking?.originalEstimateSeconds || 0), 0);
   
   const totalLogged = issues.reduce((sum, issue) => {
+    const statusName = issue.fields.status?.name?.toLowerCase() || "";
+    if (!statusName.includes("close") && !statusName.includes("đóng") && !statusName.includes("done") && !statusName.includes("resolved")) {
+      return sum;
+    }
     return sum + (issue.fields.timetracking?.timeSpentSeconds || 0);
   }, 0);
 
