@@ -103,7 +103,26 @@ export default function TeamDashboardMetrics({ issues, member }: TeamDashboardMe
 
   const weeklyChartData = dayNames.map((name, idx) => ({
     name,
-    "Giờ đã log (h)": parseFloat((dailyLoggedSeconds[idx] / 3600).toFixed(2)),
+    "Giờ đã log (h)": parseFloat((dailyLoggedSeconds[idx] / 3600).toFixed(1)),
+  }));
+
+  // ── Project-level statistics ──
+  const projectStatsMap: Record<string, { estimate: number; logged: number; remaining: number }> = {};
+  issues.forEach((i) => {
+    const pName = i.fields.project?.name || i.fields.project?.key || "Khác";
+    if (!projectStatsMap[pName]) {
+      projectStatsMap[pName] = { estimate: 0, logged: 0, remaining: 0 };
+    }
+    projectStatsMap[pName].estimate += i.fields.timetracking?.originalEstimateSeconds || 0;
+    projectStatsMap[pName].logged += i.fields.timetracking?.timeSpentSeconds || 0;
+    projectStatsMap[pName].remaining += i.fields.timetracking?.remainingEstimateSeconds || 0;
+  });
+  
+  const projectChartData = Object.entries(projectStatsMap).map(([name, stats]) => ({
+    name,
+    "Estimate": Number((stats.estimate / 3600).toFixed(1)),
+    "Đã log": Number((stats.logged / 3600).toFixed(1)),
+    "Còn lại": Number((stats.remaining / 3600).toFixed(1)),
   }));
 
   return (
@@ -248,12 +267,12 @@ export default function TeamDashboardMetrics({ issues, member }: TeamDashboardMe
       </div>
       
       {/* Charts grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16, marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 16, marginBottom: 16 }}>
         {/* Pie chart by status */}
         <div className="chart-card">
-          <div className="chart-title">Trạng thái Issues ({member ? member.displayName : "Team"})</div>
+          <div className="chart-title">Trạng thái Issues</div>
           <div className="chart-subtitle">Phân bổ theo status</div>
-          <ResponsiveContainer width="100%" height={180}>
+          <ResponsiveContainer width="100%" height={220}>
             <PieChart>
               <Pie
                 data={pieData}
@@ -278,6 +297,31 @@ export default function TeamDashboardMetrics({ issues, member }: TeamDashboardMe
               <Legend iconType="circle" wrapperStyle={{ fontSize: 11, color: "#94a3b8" }} />
             </PieChart>
           </ResponsiveContainer>
+        </div>
+
+        {/* Project time tracking chart */}
+        <div className="chart-card">
+          <div className="chart-title">Thời gian theo Dự án (giờ)</div>
+          <div className="chart-subtitle">Estimate vs Logged vs Remaining</div>
+          <div style={{ marginTop: 12 }}>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={projectChartData} margin={{ top: 8, right: 0, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ background: "#0f1527", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, fontSize: 12 }}
+                  itemStyle={{ color: "#f1f5f9" }}
+                  labelStyle={{ color: "#f1f5f9", fontWeight: 600 }}
+                  cursor={{ fill: "rgba(255,255,255,0.05)" }}
+                />
+                <Legend wrapperStyle={{ fontSize: 11, color: "#94a3b8", paddingTop: 10 }} />
+                <Bar dataKey="Estimate" fill="#3b82f6" radius={[4,4,0,0]} barSize={16} />
+                <Bar dataKey="Đã log" fill="#10b981" radius={[4,4,0,0]} barSize={16} />
+                <Bar dataKey="Còn lại" fill="#f59e0b" radius={[4,4,0,0]} barSize={16} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </div>
     </div>

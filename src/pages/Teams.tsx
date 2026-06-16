@@ -1155,7 +1155,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
             {/* Filters */}
             <div className="settings-section">
               <div className="settings-section-title">Bộ lọc</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginTop: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 12 }}>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label>Team</label>
                   <select value={taskTeamId || ""} onChange={e => { setTaskTeamId(Number(e.target.value) || null); setTeamTasks([]); }}>
@@ -1181,16 +1181,27 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                   </select>
                 </div>
 
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label>Dự án</label>
-                  <select
-                    multiple
-                    value={taskProjects}
-                    onChange={e => setTaskProjects(Array.from(e.target.selectedOptions, o => o.value))}
-                    style={{ height: 60 }}
-                  >
-                    {JIRA_PROJECTS.map(p => <option key={p.key} value={p.key}>{p.name}</option>)}
-                  </select>
+                <div className="form-group" style={{ margin: 0, gridColumn: "1 / -1" }}>
+                  <label>Dự án (có thể chọn nhiều)</label>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+                    {JIRA_PROJECTS.map(p => {
+                      const isActive = taskProjects.includes(p.key);
+                      return (
+                        <button
+                          key={p.key}
+                          className={`btn btn-sm ${isActive ? "btn-primary" : "btn-secondary"}`}
+                          onClick={() => {
+                            if (isActive) setTaskProjects(taskProjects.filter(k => k !== p.key));
+                            else setTaskProjects([...taskProjects, p.key]);
+                            setTeamTasks([]);
+                          }}
+                          style={{ padding: "4px 12px", borderRadius: 20, fontSize: 12 }}
+                        >
+                          {p.name}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
@@ -1310,7 +1321,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
             {/* Bộ lọc riêng cho Thống kê */}
             <div className="settings-section">
               <div className="settings-section-title">Bộ lọc Thống kê</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginTop: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 12 }}>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label>Team</label>
                   <select value={statTeamId || ""} onChange={e => { setStatTeamId(Number(e.target.value) || null); setStatTasks([]); }}>
@@ -1336,16 +1347,27 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                   </select>
                 </div>
 
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label>Dự án</label>
-                  <select
-                    multiple
-                    value={statProjects}
-                    onChange={e => setStatProjects(Array.from(e.target.selectedOptions, o => o.value))}
-                    style={{ height: 60 }}
-                  >
-                    {JIRA_PROJECTS.map(p => <option key={p.key} value={p.key}>{p.name}</option>)}
-                  </select>
+                <div className="form-group" style={{ margin: 0, gridColumn: "1 / -1" }}>
+                  <label>Dự án (có thể chọn nhiều)</label>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+                    {JIRA_PROJECTS.map(p => {
+                      const isActive = statProjects.includes(p.key);
+                      return (
+                        <button
+                          key={p.key}
+                          className={`btn btn-sm ${isActive ? "btn-primary" : "btn-secondary"}`}
+                          onClick={() => {
+                            if (isActive) setStatProjects(statProjects.filter(k => k !== p.key));
+                            else setStatProjects([...statProjects, p.key]);
+                            setStatTasks([]);
+                          }}
+                          style={{ padding: "4px 12px", borderRadius: 20, fontSize: 12 }}
+                        >
+                          {p.name}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
