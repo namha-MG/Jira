@@ -922,32 +922,28 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                   <form onSubmit={handleSaveMember} style={{ marginTop: 12 }}>
                     <div className="form-group">
                       <label>Tài khoản Jira *</label>
-                      {assignableUsers.length > 0 ? (
-                        <select
-                          value={memberForm.jira_username}
-                          onChange={e => handleMemberUsernameChange(e.target.value)}
-                          disabled={memberSaving}
-                        >
-                          <option value="">-- Chọn hoặc nhập thủ công --</option>
+                      <input
+                        type="text"
+                        list="assignable-users-list"
+                        placeholder="Nhập hoặc chọn username Jira..."
+                        value={memberForm.jira_username}
+                        onChange={e => handleMemberUsernameChange(e.target.value)}
+                        disabled={memberSaving}
+                        autoComplete="off"
+                      />
+                      {assignableUsers.length > 0 && (
+                        <datalist id="assignable-users-list">
                           {assignableUsers.map(u => (
                             <option key={u.accountId || u.name} value={u.name || u.accountId}>
-                              {u.displayName} ({u.name || u.accountId})
+                              {u.displayName}
                             </option>
                           ))}
-                        </select>
-                      ) : (
-                        <input
-                          type="text"
-                          placeholder="Nhập username Jira, ví dụ: nguyenvana"
-                          value={memberForm.jira_username}
-                          onChange={e => setMemberForm(f => ({ ...f, jira_username: e.target.value }))}
-                          disabled={memberSaving}
-                        />
+                        </datalist>
                       )}
                       <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
                         {assignableUsers.length > 0
-                          ? "Danh sách từ project mặc định của team."
-                          : "Team chưa có project mặc định. Bạn có thể nhập thủ công."}
+                          ? "Gợi ý từ project mặc định. Bạn có thể tự gõ nếu không thấy."
+                          : "Team chưa có project mặc định. Hãy nhập thủ công."}
                       </div>
                     </div>
 
