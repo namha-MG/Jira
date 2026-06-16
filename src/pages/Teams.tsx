@@ -477,7 +477,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       : "";
     const statusClause = statStatusFilter !== "all" ? ` AND status = "${statStatusFilter}"` : "";
     const dateClause = useStatDateFilter
-      ? ` AND "Start date" >= "${statDateFrom}" AND "Start date" <= "${statDateTo}"`
+      ? ` AND cf[10300] >= "${statDateFrom}" AND cf[10300] <= "${statDateTo}"`
       : "";
 
     const jql = `${projectFilter}assignee in (${usernames})${statusClause}${dateClause} ORDER BY updated DESC`;
