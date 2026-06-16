@@ -477,7 +477,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       : "";
     const statusClause = statStatusFilter !== "all" ? ` AND status = "${statStatusFilter}"` : "";
     const dateClause = useStatDateFilter
-      ? ` AND updated >= "${statDateFrom}" AND updated <= "${statDateTo}"`
+      ? ` AND "Start date" >= "${statDateFrom}" AND "Start date" <= "${statDateTo}"`
       : "";
 
     const jql = `${projectFilter}assignee in (${usernames})${statusClause}${dateClause} ORDER BY updated DESC`;
@@ -1327,7 +1327,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                     onChange={e => setUseStatDateFilter(e.target.checked)}
                     style={{ margin: 0, cursor: "pointer" }}
                   />
-                  Lọc theo khoảng thời gian cập nhật
+                  Lọc theo khoảng thời gian (Start Date)
                 </label>
                 {useStatDateFilter && (
                   <>
