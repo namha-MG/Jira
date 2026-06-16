@@ -342,6 +342,7 @@ export default function Dashboard() {
   const statusCounts: Record<string, number> = {};
   let uatBugCount = 0;
   let prodBugCount = 0;
+  let subTaskCount = 0;
 
   filteredIssues.forEach((i) => {
     const s = i.fields.status.name;
@@ -352,6 +353,8 @@ export default function Dashboard() {
       uatBugCount++;
     } else if (typeName.includes("production bug") || typeName === "bug") {
       prodBugCount++;
+    } else if (typeName.includes("sub-task") || typeName.includes("subtask")) {
+      subTaskCount++;
     }
   });
   const pieData = Object.entries(statusCounts).map(([name, value]) => ({ name, value }));
@@ -680,6 +683,14 @@ export default function Dashboard() {
                 <div className="stat-icon">🚨</div>
                 <div className="stat-value" style={{ color: "var(--accent-red)" }}>{prodBugCount}</div>
                 <div className="stat-label">Production Bug</div>
+                <div className="stat-change neutral">
+                  Trong kỳ này
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-icon">✅</div>
+                <div className="stat-value" style={{ color: "var(--accent-blue)" }}>{subTaskCount}</div>
+                <div className="stat-label">Sub-task</div>
                 <div className="stat-change neutral">
                   Trong kỳ này
                 </div>

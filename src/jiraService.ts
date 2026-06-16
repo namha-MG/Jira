@@ -211,10 +211,10 @@ export async function getMyIssues(options: {
   const { projectKeys, maxResults = 100, assignee } = options;
 
   const assigneeSelector = assignee && assignee.trim() ? `"${assignee.trim()}"` : `currentUser()`;
-  let jql = `assignee = ${assigneeSelector} ORDER BY updated DESC`;
+  let jql = `(assignee = ${assigneeSelector} OR worklogAuthor = ${assigneeSelector}) ORDER BY updated DESC`;
   if (projectKeys && projectKeys.length > 0) {
     const projectFilter = projectKeys.map((k) => `"${k}"`).join(", ");
-    jql = `project in (${projectFilter}) AND assignee = ${assigneeSelector} ORDER BY updated DESC`;
+    jql = `project in (${projectFilter}) AND (assignee = ${assigneeSelector} OR worklogAuthor = ${assigneeSelector}) ORDER BY updated DESC`;
   }
 
   const res = await jiraApi.get("/search", {

@@ -490,7 +490,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       ? `project in (${statProjects.map(p => `"${p}"`).join(", ")}) AND `
       : "";
     const statusClause = statStatusFilter !== "all" ? ` AND status = "${statStatusFilter}"` : "";
-    const jql = `${projectFilter}assignee in (${usernames})${statusClause} ORDER BY updated DESC`;
+    const jql = `${projectFilter}(assignee in (${usernames}) OR worklogAuthor in (${usernames}))${statusClause} ORDER BY updated DESC`;
 
     setStatLoading(true);
     setStatError("");
@@ -589,25 +589,47 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       const jAccount = a?.accountId;
       const jEmail = a?.emailAddress;
       
-      let matchedUsername = jName || jAccount || jEmail || "unassigned";
-      let displayName = a?.displayName || "Chưa assign";
+      const authors = issue.fields.worklog?.worklogs?.map(wl => wl.author?.name || wl.author?.accountId || wl.author?.emailAddress) || [];
+      const involvedUsernames = new Set<string>();
       
-      const found = relevantMembers.find(m => {
+      // Check Assignee
+      const assigneeMember = relevantMembers.find(m => {
         const u = m.jira_username;
         return u === jName || u === jAccount || u === jEmail ||
           (jEmail && u === jEmail.split('@')[0]) ||
           (jName && u.split('@')[0] === jName);
       });
       
-      if (found) {
-        matchedUsername = found.jira_username;
-        displayName = found.display_name || displayName;
+      if (assigneeMember) {
+        involvedUsernames.add(assigneeMember.jira_username);
+      } else {
+        involvedUsernames.add(jName || jAccount || jEmail || "unassigned");
       }
       
-      if (!groups[matchedUsername]) {
-        groups[matchedUsername] = { member: { displayName, username: matchedUsername }, issues: [] };
-      }
-      groups[matchedUsername].issues.push(issue);
+      // Check Worklog Authors
+      authors.forEach(authorId => {
+        if (!authorId) return;
+        const authorMember = relevantMembers.find(m => {
+          const u = m.jira_username;
+          return u === authorId || (authorId.includes('@') && u === authorId.split('@')[0]);
+        });
+        if (authorMember) involvedUsernames.add(authorMember.jira_username);
+      });
+      
+      // Push to all involved members
+      involvedUsernames.forEach(username => {
+        if (!groups[username]) {
+          const memberObj = relevantMembers.find(m => m.jira_username === username);
+          groups[username] = { 
+            member: { 
+              displayName: memberObj?.display_name || username, 
+              username 
+            }, 
+            issues: [] 
+          };
+        }
+        groups[username].issues.push(issue);
+      });
     });
     return Object.values(groups).sort((a, b) => b.issues.length - a.issues.length);
   }, [statTasks, statMembers, statMemberFilter]);
