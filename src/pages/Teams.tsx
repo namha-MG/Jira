@@ -447,6 +447,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       const u = m.jira_username;
       usernamesArray.push(`"${u}"`);
       if (u.includes("@")) usernamesArray.push(`"${u.split("@")[0]}"`);
+      if (m.display_name?.trim()) usernamesArray.push(`"${m.display_name.trim()}"`);
     });
     const usernames = usernamesArray.join(", ");
     const projectFilter = taskProjects.length > 0
@@ -482,6 +483,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       const u = m.jira_username;
       usernamesArray.push(`"${u}"`);
       if (u.includes("@")) usernamesArray.push(`"${u.split("@")[0]}"`);
+      if (m.display_name?.trim()) usernamesArray.push(`"${m.display_name.trim()}"`);
     });
     const usernames = usernamesArray.join(", ");
     const projectFilter = statProjects.length > 0
