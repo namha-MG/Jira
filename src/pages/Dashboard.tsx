@@ -42,6 +42,14 @@ function getProgressClass(pct: number): string {
   return "good";
 }
 
+function getIssueLoggedSeconds(issue: JiraIssue): number {
+  return issue.fields.aggregatetimespent ?? (issue.fields.timetracking?.timeSpentSeconds || 0);
+}
+
+function getIssueEstimatedSeconds(issue: JiraIssue): number {
+  return issue.fields.aggregatetimeoriginalestimate ?? (issue.fields.timetracking?.originalEstimateSeconds || 0);
+}
+
 export default function Dashboard() {
   const [issues, setIssues] = useState<JiraIssue[]>([]);
   const [loading, setLoading] = useState(true);
@@ -307,17 +315,28 @@ export default function Dashboard() {
   });
 
   // ── Aggregated stats ──
-  const totalEstimated = filteredIssues.reduce((s, i) => s + (i.fields.timetracking?.originalEstimateSeconds || 0), 0);
+  const totalEstimated = filteredIssues.reduce((s, i) => {
+    const hasParent = i.fields.parent && filteredIssues.some(p => p.key === i.fields.parent?.key);
+    if (hasParent) return s;
+    return s + getIssueEstimatedSeconds(i);
+  }, 0);
   
   // Tính tổng thời gian đã log: chỉ tính những ticket đã được closed
   const totalLogged = filteredIssues.reduce((sum, issue) => {
     const statusName = issue.fields.status?.name?.toLowerCase() || "";
-    if (!statusName.includes("close") && !statusName.includes("đóng")) {
+    if (
+      !statusName.includes("close") &&
+      !statusName.includes("đóng") &&
+      !statusName.includes("done") &&
+      !statusName.includes("hoàn thành")
+    ) {
       return sum;
     }
 
     if (timeRange === "all") {
-      return sum + (issue.fields.timetracking?.timeSpentSeconds || 0);
+      const hasParent = issue.fields.parent && filteredIssues.some(p => p.key === issue.fields.parent?.key);
+      if (hasParent) return sum;
+      return sum + getIssueLoggedSeconds(issue);
     } else {
       let rangeStart = startOfMonth;
       let rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
@@ -335,7 +354,14 @@ export default function Dashboard() {
     }
   }, 0);
 
-  const totalRemaining = filteredIssues.reduce((s, i) => s + (i.fields.timetracking?.remainingEstimateSeconds || 0), 0);
+  const totalRemaining = filteredIssues.reduce((s, i) => {
+    const hasParent = i.fields.parent && filteredIssues.some(p => p.key === i.fields.parent?.key);
+    if (hasParent) return s;
+    // For remaining, we can subtract logged from estimated
+    const est = getIssueEstimatedSeconds(i);
+    const log = getIssueLoggedSeconds(i);
+    return s + Math.max(0, est - log);
+  }, 0);
   const logPct = totalEstimated > 0 ? Math.round((totalLogged / totalEstimated) * 100) : 0;
 
   // ── Status & Type distribution ──
@@ -993,8 +1019,8 @@ export default function Dashboard() {
                   </thead>
                   <tbody>
                     {recentIssues.map((issue) => {
-                      const est = issue.fields.timetracking?.originalEstimateSeconds || 0;
-                      const log = issue.fields.timetracking?.timeSpentSeconds || 0;
+                      const est = getIssueEstimatedSeconds(issue);
+                      const log = getIssueLoggedSeconds(issue);
                       const pct = est > 0 ? Math.round((log / est) * 100) : (log > 0 ? 100 : 0);
                       return (
                         <tr key={issue.id}>

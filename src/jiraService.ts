@@ -60,6 +60,13 @@ export type JiraIssue = {
       remainingEstimateSeconds?: number;
       timeSpentSeconds?: number;
     };
+    aggregatetimespent?: number;
+    aggregatetimeoriginalestimate?: number;
+    aggregateprogress?: {
+      progress: number;
+      total: number;
+      percent: number;
+    };
     worklog?: {
       total: number;
       worklogs: JiraWorklog[];
@@ -221,7 +228,7 @@ export async function getMyIssues(options: {
     params: {
       jql,
       maxResults,
-      fields: "summary,status,priority,assignee,timetracking,worklog,created,updated,duedate,project,issuetype,customfield_10300,customfield_10302",
+      fields: "summary,status,priority,assignee,timetracking,aggregatetimespent,aggregatetimeoriginalestimate,aggregateprogress,worklog,created,updated,duedate,project,issuetype,customfield_10300,customfield_10302,parent",
     },
   });
 
