@@ -44,7 +44,7 @@ interface SubTaskCreationLog {
   error?: string;
 }
 
-type Tab = "teams" | "members" | "subtasks" | "tasks";
+type Tab = "teams" | "members" | "subtasks" | "tasks" | "statistics";
 
 const STATUS_OPTIONS = [
   { value: "all", label: "Tất cả trạng thái" },
@@ -110,10 +110,27 @@ export default function Teams() {
     return d.toISOString().slice(0, 10);
   });
   const [taskDateTo, setTaskDateTo] = useState(() => new Date().toISOString().slice(0, 10));
-  const [useDateFilter, setUseDateFilter] = useState(false);
+  const [useDateFilter, setUseDateFilter] = useState(true);
   const [teamTasks, setTeamTasks] = useState<JiraIssue[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [tasksError, setTasksError] = useState("");
+
+  // ── Tab 5: Statistics ─────────────────────────────────────────────────────
+  const [statTeamId, setStatTeamId] = useState<number | null>(null);
+  const [statMembers, setStatMembers] = useState<TeamMember[]>([]);
+  const [statProjects, setStatProjects] = useState<string[]>([JIRA_PROJECTS[0].key]);
+  const [statStatusFilter, setStatStatusFilter] = useState("all");
+  const [statMemberFilter, setStatMemberFilter] = useState("all");
+  const [statDateFrom, setStatDateFrom] = useState(() => {
+    const d = new Date();
+    d.setDate(1);
+    return d.toISOString().slice(0, 10);
+  });
+  const [statDateTo, setStatDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [useStatDateFilter, setUseStatDateFilter] = useState(true);
+  const [statTasks, setStatTasks] = useState<JiraIssue[]>([]);
+  const [statLoading, setStatLoading] = useState(false);
+  const [statError, setStatError] = useState("");
 
   // ─── Data fetching ─────────────────────────────────────────────────────────
 
@@ -175,6 +192,15 @@ export default function Teams() {
       .then(setTaskMembers)
       .catch(() => {});
   }, [taskTeamId]);
+
+  // Load stat-tab team members
+  useEffect(() => {
+    if (!statTeamId) { setStatMembers([]); return; }
+    fetch(`/api/teams/${statTeamId}/members`)
+      .then(r => r.json())
+      .then(setStatMembers)
+      .catch(() => {});
+  }, [statTeamId]);
 
   // ─── Tab 1: Team CRUD ──────────────────────────────────────────────────────
 
@@ -439,10 +465,39 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
     }
   };
 
+  const handleFetchStatTasks = async () => {
+    if (statMembers.length === 0) { setStatError("Team chưa có thành viên nào."); return; }
+    const filtered = statMemberFilter === "all" ? statMembers : statMembers.filter(m => m.jira_username === statMemberFilter);
+    if (filtered.length === 0) { setStatError("Không có thành viên nào được chọn."); return; }
+
+    const usernames = filtered.map(m => `"${m.jira_username}"`).join(", ");
+    const projectFilter = statProjects.length > 0
+      ? `project in (${statProjects.map(p => `"${p}"`).join(", ")}) AND `
+      : "";
+    const statusClause = statStatusFilter !== "all" ? ` AND status = "${statStatusFilter}"` : "";
+    const dateClause = useStatDateFilter
+      ? ` AND updated >= "${statDateFrom}" AND updated <= "${statDateTo}"`
+      : "";
+
+    const jql = `${projectFilter}assignee in (${usernames})${statusClause}${dateClause} ORDER BY updated DESC`;
+
+    setStatLoading(true);
+    setStatError("");
+    setStatTasks([]);
+    try {
+      const issues = await getAllIssuesByJql(jql, 500);
+      setStatTasks(issues);
+    } catch (err: any) {
+      setStatError("Lỗi tải dữ liệu: " + (err.message || "Không xác định"));
+    } finally {
+      setStatLoading(false);
+    }
+  };
+
   // Effort summary: only closed/done tasks
   const effortByMember = useCallback(() => {
     const closedStatuses = ["closed", "done"];
-    const closed = teamTasks.filter(i =>
+    const closed = statTasks.filter(i =>
       closedStatuses.includes(i.fields.status.name.toLowerCase())
     );
     const map: Record<string, { displayName: string; username: string; timeSpent: number; count: number }> = {};
@@ -455,7 +510,31 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       map[key].count += 1;
     });
     return Object.values(map).sort((a, b) => b.timeSpent - a.timeSpent);
-  }, [teamTasks]);
+  }, [statTasks]);
+
+  const teamStats = React.useMemo(() => {
+    let uatBugs = 0;
+    let prodBugs = 0;
+    let tasks = 0;
+    let estimateSecs = 0;
+    let loggedSecs = 0;
+
+    statTasks.forEach(t => {
+      const type = t.fields.issuetype?.name?.toLowerCase() || "";
+      if (type.includes("uat bug")) {
+        uatBugs++;
+      } else if (type.includes("production bug") || type === "bug") {
+        prodBugs++;
+      } else {
+        tasks++;
+      }
+      
+      estimateSecs += t.fields.timetracking?.originalEstimateSeconds || 0;
+      loggedSecs += t.fields.timetracking?.timeSpentSeconds || 0;
+    });
+
+    return { uatBugs, prodBugs, tasks, estimateSecs, loggedSecs };
+  }, [statTasks]);
 
   // ─── Render helpers ────────────────────────────────────────────────────────
 
@@ -463,7 +542,8 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
     { id: "teams",    icon: "🏢", label: "Quản lý Teams" },
     { id: "members",  icon: "👥", label: "Thành viên" },
     { id: "subtasks", icon: "🤖", label: "Tạo Sub-tasks AI" },
-    { id: "tasks",    icon: "📊", label: "Danh sách Task" },
+    { id: "tasks",    icon: "📋", label: "Danh sách Task" },
+    { id: "statistics", icon: "📈", label: "Thống kê" },
   ];
 
   if (!isConfigured) {
@@ -1010,8 +1090,8 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
           </div>
         )}
 
-        {/* ─── TAB 4: Danh sách Task Team ───────────────────────────────────── */}
-        {activeTab === "tasks" && (
+        {/* ─── TAB 4 & 5: Danh sách Task & Thống kê ───────────────────────────────────── */}
+        {(activeTab === "tasks" || activeTab === "statistics") && (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {/* Filters */}
             <div className="settings-section">
@@ -1084,27 +1164,6 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
 
               {tasksError && <div style={{ color: "var(--accent-red)", fontSize: 12, marginTop: 8 }}>⚠️ {tasksError}</div>}
             </div>
-
-            {/* Effort summary */}
-            {teamTasks.length > 0 && effortByMember().length > 0 && (
-              <div className="settings-section">
-                <div className="settings-section-title">📊 Tổng hợp nỗ lực (Task Closed/Done)</div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>
-                  Chỉ tính các task có trạng thái <strong>Closed</strong> hoặc <strong>Done</strong>. Dùng để báo cáo nỗ lực cuối tháng cho QA.
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
-                  {effortByMember().map(item => (
-                    <div key={item.username} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 16px" }}>
-                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{item.displayName}</div>
-                      <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>@{item.username}</div>
-                      <div style={{ fontSize: 20, fontWeight: 700, color: "var(--accent-green)" }}>{formatSeconds(item.timeSpent)}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>{item.count} task đã đóng</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Task list */}
             {teamTasks.length > 0 && (
               <div className="settings-section">
@@ -1176,7 +1235,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
               </div>
             )}
 
-            {!tasksLoading && teamTasks.length === 0 && taskTeamId && (
+            {activeTab === "tasks" && !tasksLoading && teamTasks.length === 0 && taskTeamId && (
               <div className="empty-state" style={{ padding: "48px 0" }}>
                 <div className="empty-state-icon">📋</div>
                 <div className="empty-state-title">Chưa có dữ liệu</div>
