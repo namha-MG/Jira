@@ -536,10 +536,11 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
 
   // Effort summary: only closed/done tasks
   const effortByMember = useCallback(() => {
-    const closedStatuses = ["closed", "done"];
-    const closed = statTasks.filter(i =>
-      closedStatuses.includes(i.fields.status.name.toLowerCase())
-    );
+    const closedStatuses = ["closed", "done", "hoàn thành"];
+    const closed = statTasks.filter(i => {
+      const s = i.fields.status.name.toLowerCase();
+      return closedStatuses.some(cs => s.includes(cs)) || s.includes("đóng");
+    });
     const map: Record<string, { displayName: string; username: string; timeSpent: number; count: number }> = {};
     closed.forEach(issue => {
       const a = issue.fields.assignee;
@@ -654,7 +655,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       estimateSecs += t.fields.timetracking?.originalEstimateSeconds || 0;
       
       const statusName = t.fields.status?.name?.toLowerCase() || "";
-      if (statusName.includes("close") || statusName.includes("đóng") || statusName.includes("done")) {
+      if (statusName.includes("close") || statusName.includes("đóng") || statusName.includes("done") || statusName.includes("hoàn thành")) {
         let logged = 0;
         if (useStatDateFilter && statDateFrom && statDateTo) {
           const rangeStart = new Date(statDateFrom);
