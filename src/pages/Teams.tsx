@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import TeamDashboardMetrics from "../components/TeamDashboardMetrics";
 import {
   getIssue,
   getAssignableUsers,
@@ -1090,8 +1091,8 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
           </div>
         )}
 
-        {/* ─── TAB 4 & 5: Danh sách Task & Thống kê ───────────────────────────────────── */}
-        {(activeTab === "tasks" || activeTab === "statistics") && (
+        {/* ─── TAB 4: Danh sách Task ───────────────────────────────────── */}
+        {activeTab === "tasks" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {/* Filters */}
             <div className="settings-section">
@@ -1240,6 +1241,114 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                 <div className="empty-state-icon">📋</div>
                 <div className="empty-state-title">Chưa có dữ liệu</div>
                 <p className="empty-state-text">Nhấn "Tìm kiếm" để tải danh sách task của team.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── TAB 5: Thống kê ───────────────────────────────────── */}
+        {activeTab === "statistics" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* Bộ lọc riêng cho Thống kê */}
+            <div className="settings-section">
+              <div className="settings-section-title">Bộ lọc Thống kê</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginTop: 12 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Team</label>
+                  <select value={statTeamId || ""} onChange={e => { setStatTeamId(Number(e.target.value) || null); setStatTasks([]); }}>
+                    <option value="">-- Chọn team --</option>
+                    {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Thành viên</label>
+                  <select value={statMemberFilter} onChange={e => setStatMemberFilter(e.target.value)} disabled={!statTeamId}>
+                    <option value="all">Tất cả thành viên</option>
+                    {statMembers.map(m => (
+                      <option key={m.id} value={m.jira_username}>{m.display_name || m.jira_username}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Trạng thái</label>
+                  <select value={statStatusFilter} onChange={e => setStatStatusFilter(e.target.value)}>
+                    {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  </select>
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Dự án</label>
+                  <select
+                    multiple
+                    value={statProjects}
+                    onChange={e => setStatProjects(Array.from(e.target.selectedOptions, o => o.value))}
+                    style={{ height: 60 }}
+                  >
+                    {JIRA_PROJECTS.map(p => <option key={p.key} value={p.key}>{p.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", fontWeight: "normal" }}>
+                  <input
+                    type="checkbox"
+                    checked={useStatDateFilter}
+                    onChange={e => setUseStatDateFilter(e.target.checked)}
+                    style={{ margin: 0, cursor: "pointer" }}
+                  />
+                  Lọc theo khoảng thời gian cập nhật
+                </label>
+                {useStatDateFilter && (
+                  <>
+                    <input type="date" value={statDateFrom} onChange={e => setStatDateFrom(e.target.value)} style={{ width: 150 }} />
+                    <span style={{ color: "var(--text-muted)", fontSize: 12 }}>đến</span>
+                    <input type="date" value={statDateTo} onChange={e => setStatDateTo(e.target.value)} style={{ width: 150 }} />
+                  </>
+                )}
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={handleFetchStatTasks}
+                  disabled={statLoading || !statTeamId || statMembers.length === 0}
+                  style={{ marginLeft: "auto" }}
+                >
+                  {statLoading ? <><span className="spinning">🌀</span> Đang tải...</> : "🔍 Tìm kiếm"}
+                </button>
+              </div>
+
+              {statError && <div style={{ color: "var(--accent-red)", fontSize: 12, marginTop: 8 }}>⚠️ {statError}</div>}
+            </div>
+
+            {/* Team Dashboard Metrics (The cool charts) */}
+            {statTasks.length > 0 && <TeamDashboardMetrics issues={statTasks} />}
+
+            {/* Effort summary list */}
+            {statTasks.length > 0 && effortByMember().length > 0 && (
+              <div className="settings-section">
+                <div className="settings-section-title">📊 Tổng hợp nỗ lực (Task Closed/Done)</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>
+                  Chỉ tính các task có trạng thái <strong>Closed</strong> hoặc <strong>Done</strong>. Dùng để báo cáo nỗ lực cuối tháng cho QA.
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
+                  {effortByMember().map(item => (
+                    <div key={item.username} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 16px" }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{item.displayName}</div>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>@{item.username}</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: "var(--accent-green)" }}>{formatSeconds(item.timeSpent)}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>{item.count} task đã đóng</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!statLoading && statTasks.length === 0 && statTeamId && (
+              <div className="empty-state" style={{ padding: "48px 0" }}>
+                <div className="empty-state-icon">📈</div>
+                <div className="empty-state-title">Chưa có dữ liệu thống kê</div>
+                <p className="empty-state-text">Nhấn "Tìm kiếm" để tải danh sách và thống kê cho team.</p>
               </div>
             )}
           </div>
