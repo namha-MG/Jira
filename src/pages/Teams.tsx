@@ -490,18 +490,43 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       ? `project in (${statProjects.map(p => `"${p}"`).join(", ")}) AND `
       : "";
     const statusClause = statStatusFilter !== "all" ? ` AND status = "${statStatusFilter}"` : "";
-    const dateClause = useStatDateFilter
-      ? ` AND cf[10300] >= "${statDateFrom}" AND cf[10300] <= "${statDateTo}"`
-      : "";
-
-    const jql = `${projectFilter}assignee in (${usernames})${statusClause}${dateClause} ORDER BY updated DESC`;
+    const jql = `${projectFilter}assignee in (${usernames})${statusClause} ORDER BY updated DESC`;
 
     setStatLoading(true);
     setStatError("");
     setStatTasks([]);
     try {
-      const issues = await getAllIssuesByJql(jql, 500);
-      setStatTasks(issues);
+      let issues = await getAllIssuesByJql(jql, 500);
+      
+      let filteredIssues = issues;
+      if (useStatDateFilter && statDateFrom && statDateTo) {
+        const rangeStart = new Date(statDateFrom);
+        rangeStart.setHours(0, 0, 0, 0);
+        const rangeEnd = new Date(statDateTo);
+        rangeEnd.setHours(23, 59, 59, 999);
+
+        filteredIssues = issues.filter(i => {
+           const statusName = i.fields.status?.name?.toLowerCase() || "";
+           if (statusName.includes("cancel") || statusName.includes("hủy") || statusName.includes("không thực hiện") || statusName.includes("reject")) return false;
+
+           const updatedDate = new Date(i.fields.updated);
+           if (updatedDate >= rangeStart && updatedDate <= rangeEnd) return true;
+
+           const hasWorklogThisPeriod = i.fields.worklog?.worklogs?.some(wl => {
+             const d = new Date(wl.started);
+             return d >= rangeStart && d <= rangeEnd;
+           });
+           return !!hasWorklogThisPeriod;
+        });
+      } else {
+        filteredIssues = issues.filter(i => {
+           const statusName = i.fields.status?.name?.toLowerCase() || "";
+           if (statusName.includes("cancel") || statusName.includes("hủy") || statusName.includes("không thực hiện") || statusName.includes("reject")) return false;
+           return true;
+        });
+      }
+      
+      setStatTasks(filteredIssues);
     } catch (err: any) {
       setStatError("Lỗi tải dữ liệu: " + (err.message || "Không xác định"));
     } finally {
@@ -521,11 +546,27 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       if (!a) return;
       const key = a.name || a.accountId;
       if (!map[key]) map[key] = { displayName: a.displayName, username: key, timeSpent: 0, count: 0 };
-      map[key].timeSpent += issue.fields.timetracking?.timeSpentSeconds || 0;
+      
+      let logged = 0;
+      if (useStatDateFilter && statDateFrom && statDateTo) {
+        const rangeStart = new Date(statDateFrom);
+        rangeStart.setHours(0, 0, 0, 0);
+        const rangeEnd = new Date(statDateTo);
+        rangeEnd.setHours(23, 59, 59, 999);
+        const taskDateStr = issue.fields.customfield_10300 || issue.fields.duedate || issue.fields.customfield_10302;
+        logged = issue.fields.worklog?.worklogs?.reduce((s, wl) => {
+          const wlDate = taskDateStr ? new Date(taskDateStr) : new Date(wl.started);
+          return (wlDate >= rangeStart && wlDate <= rangeEnd) ? s + wl.timeSpentSeconds : s;
+        }, 0) || 0;
+      } else {
+        logged = issue.fields.timetracking?.timeSpentSeconds || 0;
+      }
+      
+      map[key].timeSpent += logged;
       map[key].count += 1;
     });
     return Object.values(map).sort((a, b) => b.timeSpent - a.timeSpent);
-  }, [statTasks]);
+  }, [statTasks, useStatDateFilter, statDateFrom, statDateTo]);
 
   const statTasksByMember = React.useMemo(() => {
     const groups: Record<string, { member: { displayName: string; username: string }, issues: JiraIssue[] }> = {};
@@ -592,12 +633,26 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       
       const statusName = t.fields.status?.name?.toLowerCase() || "";
       if (statusName.includes("close") || statusName.includes("đóng") || statusName.includes("done")) {
-        loggedSecs += t.fields.timetracking?.timeSpentSeconds || 0;
+        let logged = 0;
+        if (useStatDateFilter && statDateFrom && statDateTo) {
+          const rangeStart = new Date(statDateFrom);
+          rangeStart.setHours(0, 0, 0, 0);
+          const rangeEnd = new Date(statDateTo);
+          rangeEnd.setHours(23, 59, 59, 999);
+          const taskDateStr = t.fields.customfield_10300 || t.fields.duedate || t.fields.customfield_10302;
+          logged = t.fields.worklog?.worklogs?.reduce((s, wl) => {
+            const wlDate = taskDateStr ? new Date(taskDateStr) : new Date(wl.started);
+            return (wlDate >= rangeStart && wlDate <= rangeEnd) ? s + wl.timeSpentSeconds : s;
+          }, 0) || 0;
+        } else {
+          logged = t.fields.timetracking?.timeSpentSeconds || 0;
+        }
+        loggedSecs += logged;
       }
     });
 
     return { uatBugs, prodBugs, tasks, estimateSecs, loggedSecs };
-  }, [statTasks]);
+  }, [statTasks, useStatDateFilter, statDateFrom, statDateTo]);
 
   // ─── Render helpers ────────────────────────────────────────────────────────
 
@@ -1422,7 +1477,13 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                         {group.issues.length} Issues
                       </div>
                     </div>
-                    <TeamDashboardMetrics issues={group.issues} member={group.member} />
+                    <TeamDashboardMetrics 
+                      issues={group.issues} 
+                      member={group.member} 
+                      useDateFilter={useStatDateFilter}
+                      dateFrom={statDateFrom}
+                      dateTo={statDateTo}
+                    />
                   </div>
                 ))}
               </div>

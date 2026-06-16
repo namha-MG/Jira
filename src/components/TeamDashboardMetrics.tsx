@@ -8,6 +8,9 @@ import { JiraIssue, formatSeconds } from "../jiraService";
 interface TeamDashboardMetricsProps {
   issues: JiraIssue[];
   member?: { displayName: string; username: string };
+  useDateFilter?: boolean;
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -26,7 +29,7 @@ function getProgressClass(pct: number): string {
   return "good";
 }
 
-export default function TeamDashboardMetrics({ issues, member }: TeamDashboardMetricsProps) {
+export default function TeamDashboardMetrics({ issues, member, useDateFilter, dateFrom, dateTo }: TeamDashboardMetricsProps) {
   const totalEstimated = issues.reduce((s, i) => s + (i.fields.timetracking?.originalEstimateSeconds || 0), 0);
   
   const totalLogged = issues.reduce((sum, issue) => {
@@ -34,7 +37,22 @@ export default function TeamDashboardMetrics({ issues, member }: TeamDashboardMe
     if (!statusName.includes("close") && !statusName.includes("đóng") && !statusName.includes("done")) {
       return sum;
     }
-    return sum + (issue.fields.timetracking?.timeSpentSeconds || 0);
+    
+    if (useDateFilter && dateFrom && dateTo) {
+      const rangeStart = new Date(dateFrom);
+      rangeStart.setHours(0, 0, 0, 0);
+      const rangeEnd = new Date(dateTo);
+      rangeEnd.setHours(23, 59, 59, 999);
+      
+      const taskDateStr = issue.fields.customfield_10300 || issue.fields.duedate || issue.fields.customfield_10302;
+      const periodLogs = issue.fields.worklog?.worklogs?.reduce((s, wl) => {
+        const wlDate = taskDateStr ? new Date(taskDateStr) : new Date(wl.started);
+        return (wlDate >= rangeStart && wlDate <= rangeEnd) ? s + wl.timeSpentSeconds : s;
+      }, 0) || 0;
+      return sum + periodLogs;
+    } else {
+      return sum + (issue.fields.timetracking?.timeSpentSeconds || 0);
+    }
   }, 0);
 
   const totalRemaining = issues.reduce((s, i) => s + (i.fields.timetracking?.remainingEstimateSeconds || 0), 0);
@@ -118,7 +136,23 @@ export default function TeamDashboardMetrics({ issues, member }: TeamDashboardMe
       projectStatsMap[pName] = { estimate: 0, logged: 0, remaining: 0 };
     }
     projectStatsMap[pName].estimate += i.fields.timetracking?.originalEstimateSeconds || 0;
-    projectStatsMap[pName].logged += i.fields.timetracking?.timeSpentSeconds || 0;
+    
+    let logged = 0;
+    if (useDateFilter && dateFrom && dateTo) {
+      const rangeStart = new Date(dateFrom);
+      rangeStart.setHours(0, 0, 0, 0);
+      const rangeEnd = new Date(dateTo);
+      rangeEnd.setHours(23, 59, 59, 999);
+      const taskDateStr = i.fields.customfield_10300 || i.fields.duedate || i.fields.customfield_10302;
+      logged = i.fields.worklog?.worklogs?.reduce((s, wl) => {
+        const wlDate = taskDateStr ? new Date(taskDateStr) : new Date(wl.started);
+        return (wlDate >= rangeStart && wlDate <= rangeEnd) ? s + wl.timeSpentSeconds : s;
+      }, 0) || 0;
+    } else {
+      logged = i.fields.timetracking?.timeSpentSeconds || 0;
+    }
+    projectStatsMap[pName].logged += logged;
+    
     projectStatsMap[pName].remaining += i.fields.timetracking?.remainingEstimateSeconds || 0;
   });
   
