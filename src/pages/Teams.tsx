@@ -515,6 +515,19 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
 
   const statTasksByMember = React.useMemo(() => {
     const groups: Record<string, { member: { displayName: string; username: string }, issues: JiraIssue[] }> = {};
+    
+    // Khởi tạo sẵn tất cả các thành viên được filter, để ai cũng có dashboard dù chưa có task
+    const relevantMembers = statMemberFilter === "all" 
+      ? statMembers 
+      : statMembers.filter(m => m.jira_username === statMemberFilter);
+      
+    relevantMembers.forEach(m => {
+      groups[m.jira_username] = { 
+        member: { displayName: m.display_name || m.jira_username, username: m.jira_username }, 
+        issues: [] 
+      };
+    });
+
     statTasks.forEach(issue => {
       const a = issue.fields.assignee;
       const username = a?.name || a?.accountId || a?.emailAddress || "unassigned";
@@ -526,7 +539,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       groups[username].issues.push(issue);
     });
     return Object.values(groups).sort((a, b) => b.issues.length - a.issues.length);
-  }, [statTasks]);
+  }, [statTasks, statMembers, statMemberFilter]);
 
   const teamStats = React.useMemo(() => {
     let uatBugs = 0;
