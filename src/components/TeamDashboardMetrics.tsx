@@ -162,7 +162,7 @@ export default function TeamDashboardMetrics({ issues, member }: TeamDashboardMe
         <div className="stat-card">
           <div className="stat-icon">⏱️</div>
           <div className="stat-value">{formatSeconds(totalLogged)}</div>
-          <div className="stat-label">Đã Log (Tổng)</div>
+          <div className="stat-label">Đã Log (Closed)</div>
           <div className={`stat-change ${logPct > 100 ? "negative" : logPct > 80 ? "neutral" : "positive"}`}>
             {logPct}% so với estimate
           </div>
