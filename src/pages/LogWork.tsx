@@ -331,21 +331,30 @@ export default function LogWork() {
           }
         }
 
+        let logSeconds = seconds;
+        if (issueObj && (issueObj.fields.issuetype?.name?.toLowerCase().includes("sub-task") || issueObj.fields.issuetype?.name?.toLowerCase().includes("subtask"))) {
+           const estSecs = issueObj.fields.timetracking?.originalEstimateSeconds;
+           if (estSecs && estSecs > 0) {
+              logSeconds = estSecs;
+           }
+        }
+
         await addWorklog(key, {
-          timeSpentSeconds: seconds,
+          timeSpentSeconds: logSeconds,
           comment: finalComment,
           started,
           adjustEstimate,
         });
         
-        addToast("success", `✅ Đã log ${timeSpent} vào ${key} thành công!`);
+        const loggedTimeDisplay = logSeconds === seconds ? timeSpent : `${Math.round(logSeconds/3600)}h`;
+        addToast("success", `✅ Đã log ${loggedTimeDisplay} vào ${key} thành công!`);
         successCount++;
 
         // Tự động chuyển đổi trạng thái nếu tổng thời gian log vượt quá estimate
         if (issueObj) {
           const est = issueObj.fields.timetracking?.originalEstimateSeconds || 0;
           const currentLogged = issueObj.fields.timetracking?.timeSpentSeconds || 0;
-          const newTotalLogged = currentLogged + seconds;
+          const newTotalLogged = currentLogged + logSeconds;
 
           if (est > 0 && newTotalLogged >= est) {
             setTimeout(() => handleAutoTransition(key, issueObj.fields.summary), 1000);

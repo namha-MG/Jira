@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { createIssue, addWorklog, JiraIssue, JiraUser, getLatestTaskDate, getAssignableUsers } from "../jiraService";
+import * as XLSX from "xlsx";
+import { createIssue, createSubTask, addWorklog, JiraIssue, JiraUser, getLatestTaskDate, getAssignableUsers } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
 interface CreationLog {
@@ -14,7 +15,7 @@ export default function BulkCreate() {
   const [selectedProject, setSelectedProject] = useState(JIRA_PROJECTS[0].key);
   const [bulkText, setBulkText] = useState("");
   const [assignee, setAssignee] = useState("");
-  const [estimate] = useState("7h"); // Cố định 7h theo yêu cầu
+  const [estimate] = useState("7h"); // Cố định 7h theo yêu cầu thủ công
   const [autoLogWork, setAutoLogWork] = useState(true);
   const [startDate, setStartDate] = useState(() => {
     const now = new Date();
@@ -23,7 +24,7 @@ export default function BulkCreate() {
   const [logs, setLogs] = useState<CreationLog[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   
-  const [creationMode, setCreationMode] = useState<"manual" | "ai">("manual");
+  const [creationMode, setCreationMode] = useState<"manual" | "ai" | "excel">("manual");
   const [aiContext, setAiContext] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzedTasks, setAnalyzedTasks] = useState<{summary: string, assignee: string}[]>([]);
@@ -32,6 +33,8 @@ export default function BulkCreate() {
   
   const [assignableUsers, setAssignableUsers] = useState<JiraUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  
+  const [excelData, setExcelData] = useState<any[]>([]);
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
 
@@ -45,7 +48,6 @@ export default function BulkCreate() {
     }
   }, [isConfigured, selectedProject]);
 
-  // Helper tìm ngày làm việc kế tiếp (bỏ qua Thứ Bảy/Chủ Nhật)
   const getNextWorkday = (date: Date): Date => {
     const d = new Date(date);
     while (d.getDay() === 0 || d.getDay() === 6) {
@@ -60,7 +62,273 @@ export default function BulkCreate() {
     return getNextWorkday(d);
   };
 
-  const handleBulkCreate = async (e: React.FormEvent | null, tasksToCreate?: {summary: string, assignee: string}[]) => {
+  const calculateWorkingDays = (startStr: string, endStr: string) => {
+    if (!startStr || !endStr) return 0;
+    const s = new Date(startStr);
+    const e = new Date(endStr);
+    if (isNaN(s.getTime()) || isNaN(e.getTime())) return 0;
+    let days = 0;
+    let curr = new Date(s);
+    while (curr <= e) {
+      if (curr.getDay() !== 0 && curr.getDay() !== 6) days++;
+      curr.setDate(curr.getDate() + 1);
+    }
+    return days;
+  };
+
+  const addWorkingHours = (startDateStr: string, hours: number) => {
+    let d = new Date(startDateStr);
+    let remainingHours = hours;
+    while (remainingHours >= 8) {
+      d.setDate(d.getDate() + 1);
+      if (d.getDay() !== 0 && d.getDay() !== 6) {
+        remainingHours -= 8;
+      }
+    }
+    d.setHours(d.getHours() + remainingHours);
+    return d;
+  };
+
+  const formatJiraIsoDate = (d: Date, hour: number = 8, minute: number = 0) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const hh = String(hour).padStart(2, "0");
+    const mm = String(minute).padStart(2, "0");
+
+    const offset = -d.getTimezoneOffset();
+    const sign = offset >= 0 ? "+" : "-";
+    const offsetHours = String(Math.floor(Math.abs(offset) / 60)).padStart(2, "0");
+    const offsetMins = String(Math.abs(offset) % 60).padStart(2, "0");
+
+    return `${year}-${month}-${day}T${hh}:${mm}:00.000${sign}${offsetHours}${offsetMins}`;
+  };
+
+  const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const bstr = evt.target?.result;
+      const wb = XLSX.read(bstr, { type: "binary", cellDates: true });
+      const wsname = wb.SheetNames[0];
+      const ws = wb.Sheets[wsname];
+      const data = XLSX.utils.sheet_to_json(ws);
+      setExcelData(data);
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const handleExcelSubmit = async () => {
+    if (excelData.length === 0) return;
+    setIsRunning(true);
+
+    const BA_TEMPLATES = [
+      "[BA] Nghiên cứu & phân tích nghiệp vụ",
+      "[BA] Viết tài liệu nghiệp vụ",
+      "[BA] Support nghiệp vụ cho dev test"
+    ];
+
+    const TESTER_TEMPLATES = [
+      "[Tester] Nghiên cứu tài liệu nghiệp vụ",
+      "[Tester] Viết checklist test/test case",
+      "[Tester] Test chức năng"
+    ];
+
+    const parentTasks = excelData.filter(r => r["Issue Type"] === "Task" || r["Issue Type"] === "Story");
+    const subTasksRaw = excelData.filter(r => r["Issue Type"] === "Sub-task");
+
+    const newLogs: CreationLog[] = [];
+    parentTasks.forEach(p => newLogs.push({ summary: p["Summary"], status: "pending" }));
+    setLogs(newLogs);
+
+    let logIndexOffset = 0;
+
+    for (let i = 0; i < parentTasks.length; i++) {
+      const row = parentTasks[i];
+      const summary = row["Summary"];
+      if (!summary) continue;
+
+      const logIndex = i + logIndexOffset;
+      setLogs(prev => prev.map((l, idx) => idx === logIndex ? { ...l, status: "processing" } : l));
+
+      try {
+        const issueType = row["Issue Type"] || "Task";
+        const epicName = row["Epic Name"];
+        const rowAssignee = row["Assignee"] || assignee;
+        const startD = row["Custom field (Start Date (Time))"];
+        const endD = row["Custom field (Due Date (Time))"];
+        const origEstimate = row["Original Estimate"];
+
+        const customFields: any = {};
+        let formattedStartD = "";
+        let formattedEndD = "";
+
+        if (startD) {
+          formattedStartD = formatJiraIsoDate(new Date(startD));
+          customFields["customfield_10300"] = formattedStartD;
+        }
+        if (endD) {
+          formattedEndD = formatJiraIsoDate(new Date(endD), 17, 0);
+          customFields["customfield_10302"] = formattedEndD;
+        }
+
+        const created: JiraIssue = await createIssue({
+          projectKey: selectedProject,
+          summary: summary,
+          issueTypeName: issueType,
+          assigneeName: rowAssignee || undefined,
+          originalEstimate: origEstimate,
+          customFields
+        });
+
+        if (autoLogWork && formattedStartD) {
+          const startedStr = formattedStartD.replace(/\+.*$/, "+0000");
+          let logComment = `Thực hiện công việc: ${summary}`;
+          try {
+            await addWorklog(created.key, {
+              timeSpentSeconds: 7 * 3600, // default 7h for parent
+              comment: logComment,
+              started: startedStr,
+              adjustEstimate: "auto",
+            });
+          } catch(e) {
+            console.warn("Lỗi auto log work parent", e);
+          }
+        }
+
+        setLogs(prev => prev.map((l, idx) => idx === logIndex ? { ...l, status: "success", key: created.key } : l));
+
+        const parentKey = created.key;
+        
+        let subtasksToCreate = subTasksRaw.filter(s => s["Epic Name"] === epicName).map(s => ({ title: s["Summary"], est: s["Original Estimate"] || "0h" }));
+        
+        if (issueType === "Story") {
+           const baTasks = BA_TEMPLATES.map(t => ({ title: t, est: "2h" }));
+           const testerTasks = TESTER_TEMPLATES.map(t => ({ title: t, est: "2h" }));
+           let devTasks: {title: string, est: string}[] = [];
+
+           const geminiKey = localStorage.getItem("gemini_api_key");
+           if (geminiKey) {
+             const prompt = (startD && endD) 
+               ? `Bạn là một lập trình viên. Hãy phân tích Story có tiêu đề "${summary}" thành các sub-task nhỏ cho lập trình viên (Dev). Trả về danh sách thuần túy, mỗi dòng 1 task, không markdown.`
+               : `Bạn là một lập trình viên. Hãy phân tích Story có tiêu đề "${summary}" thành các sub-task nhỏ cho lập trình viên Junior (Dev) kèm theo estimate bằng giờ (h). Trả về danh sách thuần túy, mỗi dòng định dạng: Tên sub-task | Xh (ví dụ: Viết API | 4h). Không markdown.`;
+             
+             try {
+                 const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
+                   method: "POST",
+                   headers: { "Content-Type": "application/json" },
+                   body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                 });
+                 if (response.ok) {
+                   const data = await response.json();
+                   const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+                   if (text) {
+                     const lines = text.split("\n").filter((l: string) => l.trim().length > 3);
+                     if (startD && endD) {
+                       devTasks = lines.map((l: string) => ({ title: `[Dev] ${l.replace(/^[-*]\s*/, '').trim()}`, est: "2h" }));
+                     } else {
+                       devTasks = lines.map((l: string) => {
+                         const parts = l.split("|");
+                         if (parts.length >= 2) {
+                           return { title: `[Dev] ${parts[0].replace(/^[-*]\s*/, '').trim()}`, est: parts[1].trim() };
+                         }
+                         return { title: `[Dev] ${l.replace(/^[-*]\s*/, '').trim()}`, est: "4h" };
+                       });
+                     }
+                   }
+                 }
+             } catch (aiErr) {
+                 console.warn("AI generation for dev tasks failed", aiErr);
+             }
+           }
+
+          if (startD && endD) {
+            const workingDays = calculateWorkingDays(startD, endD);
+            const totalHours = workingDays * 8;
+            if (totalHours > 0) {
+               const baEst = Math.round(totalHours / baTasks.length) + "h";
+               const testerEst = Math.round(totalHours / testerTasks.length) + "h";
+               const devEst = devTasks.length > 0 ? Math.round(totalHours / devTasks.length) + "h" : "0h";
+               
+               baTasks.forEach(t => t.est = baEst);
+               testerTasks.forEach(t => t.est = testerEst);
+               devTasks.forEach(t => t.est = devEst);
+            }
+          }
+          
+          subtasksToCreate = [...subtasksToCreate, ...baTasks, ...testerTasks, ...devTasks];
+        }
+
+        if (subtasksToCreate.length > 0) {
+          const subLogs = subtasksToCreate.map(t => ({ summary: `↳ ${t.title}`, status: "pending" as const }));
+          setLogs(prev => {
+             const copy = [...prev];
+             copy.splice(logIndex + 1, 0, ...subLogs);
+             return copy;
+          });
+
+          let currentSubIndex = logIndex + 1;
+          for (const sub of subtasksToCreate) {
+             setLogs(prev => prev.map((l, idx) => idx === currentSubIndex ? { ...l, status: "processing" } : l));
+             
+             let subCustomFields: any = {};
+             if (formattedStartD) {
+                 subCustomFields["customfield_10300"] = formattedStartD;
+                 const estHours = parseInt(sub.est.replace("h", "")) || 0;
+                 if (estHours > 0) {
+                     const subEndD = addWorkingHours(formattedStartD, estHours);
+                     subCustomFields["customfield_10302"] = formatJiraIsoDate(subEndD, 17, 0);
+                 }
+             }
+
+             try {
+                const sCreated = await createSubTask({
+                  parentKey: parentKey,
+                  projectKey: selectedProject,
+                  summary: sub.title,
+                  assigneeName: rowAssignee || undefined,
+                  originalEstimate: sub.est,
+                  customFields: Object.keys(subCustomFields).length > 0 ? subCustomFields : undefined
+                });
+
+                if (autoLogWork && formattedStartD) {
+                  const startedStr = formattedStartD.replace(/\+.*$/, "+0000");
+                  let logComment = `Thực hiện công việc: ${sub.title}`;
+                  const estHours = parseInt(sub.est.replace("h", "")) || 0;
+                  if (estHours > 0) {
+                    try {
+                      await addWorklog(sCreated.key, {
+                        timeSpentSeconds: estHours * 3600, // log = estimate
+                        comment: logComment,
+                        started: startedStr,
+                        adjustEstimate: "auto",
+                      });
+                    } catch(e) {
+                      console.warn("Lỗi auto log work subtask", e);
+                    }
+                  }
+                }
+
+                setLogs(prev => prev.map((l, idx) => idx === currentSubIndex ? { ...l, status: "success", key: sCreated.key } : l));
+             } catch (e: any) {
+                setLogs(prev => prev.map((l, idx) => idx === currentSubIndex ? { ...l, status: "error", errorMsg: "Lỗi tạo sub-task" } : l));
+             }
+             currentSubIndex++;
+          }
+          logIndexOffset += subtasksToCreate.length;
+        }
+
+      } catch (err: any) {
+        const msg = err.response?.data?.errorMessages?.[0] || err.message || "Lỗi tạo issue";
+        setLogs(prev => prev.map((l, idx) => idx === logIndex ? { ...l, status: "error", errorMsg: msg } : l));
+      }
+    }
+    
+    setIsRunning(false);
+  };
+
+  const handleBulkCreateManual = async (e: React.FormEvent | null, tasksToCreate?: {summary: string, assignee: string}[]) => {
     if (e) e.preventDefault();
     
     const summaries = tasksToCreate 
@@ -94,7 +362,6 @@ export default function BulkCreate() {
         day: "numeric",
       });
 
-      // Cập nhật trạng thái sang 'processing' kèm ngày log/gán
       setLogs((prev) =>
         prev.map((log, idx) =>
           idx === i 
@@ -110,24 +377,8 @@ export default function BulkCreate() {
       );
 
       try {
-        const formatJiraIsoDate = (d: Date, hour: number, minute: number) => {
-          const year = d.getFullYear();
-          const month = String(d.getMonth() + 1).padStart(2, "0");
-          const day = String(d.getDate()).padStart(2, "0");
-          const hh = String(hour).padStart(2, "0");
-          const mm = String(minute).padStart(2, "0");
-
-          // Tính múi giờ hiện tại (timezone offset) để định dạng +0700
-          const offset = -d.getTimezoneOffset();
-          const sign = offset >= 0 ? "+" : "-";
-          const offsetHours = String(Math.floor(Math.abs(offset) / 60)).padStart(2, "0");
-          const offsetMins = String(Math.abs(offset) % 60).padStart(2, "0");
-
-          return `${year}-${month}-${day}T${hh}:${mm}:00.000${sign}${offsetHours}${offsetMins}`;
-        };
-
-        const startDateStr = formatJiraIsoDate(currentLogDate, 8, 0); // 08:00 AM
-        const endDateStr = formatJiraIsoDate(currentLogDate, 17, 0); // 17:00 PM (5:00 PM)
+        const startDateStr = formatJiraIsoDate(currentLogDate, 8, 0);
+        const endDateStr = formatJiraIsoDate(currentLogDate, 17, 0);
 
         const created: JiraIssue = await createIssue({
           projectKey: selectedProject,
@@ -140,10 +391,8 @@ export default function BulkCreate() {
           }
         });
 
-        // Nếu bật tự động log, thực hiện log work 7h
         if (autoLogWork) {
           const startedStr = currentLogDate.toISOString().replace("Z", "+0000");
-          
           let logComment = `Thực hiện công việc: ${summaries[i].summary}`;
           const geminiKey = localStorage.getItem("gemini_api_key");
           if (geminiKey) {
@@ -160,28 +409,20 @@ export default function BulkCreate() {
                 if (text) {
                   logComment = text;
                 }
-              } else {
-                let errText = `HTTP ${response.status}`;
-                try {
-                  const errData = await response.json();
-                  errText = errData.error?.message || errData.message || errText;
-                } catch {}
-                console.warn(`BulkCreate AI comment failed: ${errText}`);
               }
             } catch (e) {
-              console.warn("AI generation failed for worklog comment in BulkCreate, using fallback.", e);
+              console.warn("AI generation failed for worklog comment", e);
             }
           }
 
           await addWorklog(created.key, {
-            timeSpentSeconds: 7 * 3600, // 7h
+            timeSpentSeconds: 7 * 3600,
             comment: logComment,
             started: startedStr,
             adjustEstimate: "auto",
           });
         }
 
-        // Cập nhật trạng thái 'success' kèm theo Key
         setLogs((prev) =>
           prev.map((log, idx) =>
             idx === i ? { ...log, status: "success", key: created.key } : log
@@ -190,8 +431,6 @@ export default function BulkCreate() {
       } catch (err: unknown) {
         const e = err as { response?: { data?: { errorMessages?: string[] } }; message?: string };
         const msg = e.response?.data?.errorMessages?.[0] || e.message || "Lỗi tạo issue";
-        
-        // Cập nhật trạng thái 'error'
         setLogs((prev) =>
           prev.map((log, idx) =>
             idx === i ? { ...log, status: "error", errorMsg: msg } : log
@@ -239,11 +478,9 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
       
       if (text) {
-        // Tách dòng và loại bỏ dấu gạch ngang đầu dòng (nếu có)
         const tasks = text.split("\n").map(t => t.replace(/^[-*]\s*/, '').trim()).filter(t => t.length > 0);
         setAnalyzedTasks(tasks.map(t => ({ summary: t, assignee: assignee.trim() })));
         
-        // Tìm ngày task cuối cùng
         const latestDate = await getLatestTaskDate([selectedProject], assignee.trim() || undefined);
         if (latestDate) {
           const nextDay = advanceDay(latestDate);
@@ -284,7 +521,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
       <div className="page-header">
         <div className="page-title-group">
           <h1 className="page-title">Tạo Issue Nhanh</h1>
-          <p className="page-subtitle">Tự động tạo nhiều issues với thời gian Estimate mặc định là 7 giờ</p>
+          <p className="page-subtitle">Tự động tạo nhiều issues với nhiều chế độ khác nhau</p>
         </div>
       </div>
 
@@ -305,12 +542,18 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
               >
                 ✨ Tạo bằng AI Context
               </button>
+              <button
+                className={`btn btn-sm ${creationMode === "excel" ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setCreationMode("excel")}
+              >
+                📁 Import Excel
+              </button>
             </div>
 
             {creationMode === "ai" ? (
               <div>
                 <div className="settings-section-title">✨ Phân tích công việc bằng AI</div>
-                <div className="settings-section-desc">Nhập mô tả các công việc bạn đã làm, AI sẽ tự động chia nhỏ thành các task và tự động tính toán ngày bắt đầu dựa trên task cuối cùng của bạn.</div>
+                <div className="settings-section-desc">Nhập mô tả các công việc bạn đã làm, AI sẽ tự động chia nhỏ thành các task và tự động tính toán ngày bắt đầu.</div>
                 
                 <div className="form-group" style={{ marginTop: 16 }}>
                   <label>Dự án (Project)</label>
@@ -341,9 +584,6 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                       </option>
                     ))}
                   </select>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                    Dùng để tìm task cuối cùng của người này và tự động điền Assignee cho từng task sinh ra.
-                  </div>
                 </div>
 
                 <div className="form-group">
@@ -365,15 +605,12 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                       </label>
                     ))}
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                    Nếu chọn, AI sẽ chỉ trích xuất các task thuộc về các vai trò này.
-                  </div>
                 </div>
 
                 <div className="form-group">
                   <label>Nội dung mô tả công việc (Context)</label>
                   <textarea
-                    placeholder="Ví dụ: Tuần này tôi đã code xong API đăng nhập, sau đó tôi thiết kế lại database cho bảng Users, tiếp theo tôi fix bug lỗi hiển thị trên trang chủ..."
+                    placeholder="Ví dụ: Tuần này tôi đã code xong API đăng nhập..."
                     value={aiContext}
                     onChange={(e) => setAiContext(e.target.value)}
                     disabled={isAnalyzing}
@@ -398,14 +635,13 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
 
                 {analyzedTasks.length > 0 && (
                   <div style={{ marginTop: 24, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
-                    <div className="settings-section-title" style={{ marginBottom: 12 }}>📝 Danh sách Task (Có thể chỉnh sửa)</div>
+                    <div className="settings-section-title" style={{ marginBottom: 12 }}>📝 Danh sách Task</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
                       {analyzedTasks.map((task, idx) => (
                         <div key={idx} style={{ display: "flex", gap: 8 }}>
                           <input
                             type="text"
                             value={task.summary}
-                            placeholder="Tóm tắt công việc"
                             onChange={(e) => {
                               const newTasks = [...analyzedTasks];
                               newTasks[idx].summary = e.target.value;
@@ -482,17 +718,12 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                         disabled={isRunning}
                         required
                       />
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                        {autoLogWork 
-                          ? "Mỗi task sẽ tự động được gán Start/End Date và log 7h trên 1 ngày kế tiếp (bỏ qua Thứ Bảy và Chủ Nhật)."
-                          : "Mỗi task sẽ tự động được gán Start/End Date trên 1 ngày kế tiếp (bỏ qua Thứ Bảy và Chủ Nhật) nhưng KHÔNG thực hiện log work."}
-                      </div>
                     </div>
 
                     <button
                       type="button"
                       className="btn btn-primary"
-                      onClick={() => handleBulkCreate(null, analyzedTasks)}
+                      onClick={() => handleBulkCreateManual(null, analyzedTasks)}
                       disabled={isRunning || analyzedTasks.filter(t => t.summary.trim()).length === 0}
                       style={{ width: "100%", padding: "12px", marginTop: 8 }}
                     >
@@ -505,119 +736,179 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                   </div>
                 )}
               </div>
+            ) : creationMode === "excel" ? (
+              <div>
+                 <div className="settings-section-title">📁 Import từ file Excel</div>
+                 <div className="settings-section-desc">Upload file Excel để tự động tạo Task, Story và Sub-tasks cùng lúc.</div>
+                 
+                 <div className="form-group" style={{ marginTop: 16 }}>
+                  <label>Dự án (Project)</label>
+                  <select
+                    value={selectedProject}
+                    onChange={(e) => setSelectedProject(e.target.value)}
+                    disabled={isRunning}
+                  >
+                    {JIRA_PROJECTS.map((p) => (
+                      <option key={p.key} value={p.key}>
+                        {p.name} ({p.key})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                 <div className="form-group" style={{ marginTop: 16 }}>
+                    <label>File Excel (.xlsx)</label>
+                    <input type="file" accept=".xlsx, .xls" onChange={handleExcelUpload} disabled={isRunning} style={{ padding: "8px 0" }} />
+                 </div>
+
+                 {excelData.length > 0 && (
+                   <div style={{ marginTop: 16 }}>
+                     <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 8 }}>
+                       Đã đọc <strong>{excelData.length}</strong> dòng từ file.
+                     </div>
+                     <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
+                       <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                         <thead style={{ background: "rgba(255,255,255,0.05)", position: "sticky", top: 0 }}>
+                           <tr>
+                             <th style={{ padding: 8, textAlign: "left", borderBottom: "1px solid var(--border)" }}>Type</th>
+                             <th style={{ padding: 8, textAlign: "left", borderBottom: "1px solid var(--border)" }}>Summary</th>
+                             <th style={{ padding: 8, textAlign: "left", borderBottom: "1px solid var(--border)" }}>Epic</th>
+                           </tr>
+                         </thead>
+                         <tbody>
+                           {excelData.map((r, i) => (
+                             <tr key={i}>
+                               <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>{r["Issue Type"]}</td>
+                               <td style={{ padding: 8, borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", textOverflow: "ellipsis", maxWidth: 150, overflow: "hidden" }}>{r["Summary"]}</td>
+                               <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>{r["Epic Name"]}</td>
+                             </tr>
+                           ))}
+                         </tbody>
+                       </table>
+                     </div>
+
+                     <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
+                       <input
+                         id="checkbox-autolog-excel"
+                         type="checkbox"
+                         checked={autoLogWork}
+                         onChange={(e) => setAutoLogWork(e.target.checked)}
+                         disabled={isRunning}
+                         style={{ width: "auto", margin: 0, cursor: "pointer" }}
+                       />
+                       <label htmlFor="checkbox-autolog-excel" style={{ cursor: "pointer", fontWeight: "normal", fontSize: 13, userSelect: "none" }}>
+                         Tự động log work cho các issue/sub-task sau khi tạo?
+                       </label>
+                     </div>
+
+                     <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={handleExcelSubmit}
+                      disabled={isRunning}
+                      style={{ width: "100%", padding: "12px", marginTop: 8 }}
+                    >
+                      {isRunning ? (
+                        <><span className="spinning">🌀</span> Đang xử lý tự động...</>
+                      ) : (
+                        <>🚀 Bắt đầu Tạo Issues từ Excel</>
+                      )}
+                    </button>
+                   </div>
+                 )}
+              </div>
             ) : (
               <>
                 <div className="settings-section-title">➕ Tạo hàng loạt Issue</div>
                 <div className="settings-section-desc">Mỗi dòng văn bản bên dưới sẽ được tạo thành một Issue riêng biệt.</div>
 
-                <form onSubmit={handleBulkCreate}>
-              <div className="form-group">
-                <label>Dự án (Project)</label>
-                <select
-                  value={selectedProject}
-                  onChange={(e) => setSelectedProject(e.target.value)}
-                  disabled={isRunning}
-                >
-                  {JIRA_PROJECTS.map((p) => (
-                    <option key={p.key} value={p.key}>
-                      {p.name} ({p.key})
-                    </option>
-                  ))}
-                </select>
-              </div>
+                <form onSubmit={handleBulkCreateManual}>
+                  <div className="form-group">
+                    <label>Dự án (Project)</label>
+                    <select
+                      value={selectedProject}
+                      onChange={(e) => setSelectedProject(e.target.value)}
+                      disabled={isRunning}
+                    >
+                      {JIRA_PROJECTS.map((p) => (
+                        <option key={p.key} value={p.key}>
+                          {p.name} ({p.key})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              <div className="form-group">
-                <label>Danh sách tóm tắt Issue (Mỗi dòng là 1 Issue) *</label>
-                <textarea
-                  placeholder="Ví dụ:&#10;Thiết kế giao diện trang chủ&#10;Viết API đồng bộ hóa dữ liệu&#10;Kiểm thử các chức năng cốt lõi"
-                  value={bulkText}
-                  onChange={(e) => setBulkText(e.target.value)}
-                  disabled={isRunning}
-                  rows={8}
-                  style={{ fontFamily: "inherit", lineHeight: "1.5" }}
-                  required
-                />
-              </div>
+                  <div className="form-group">
+                    <label>Danh sách tóm tắt Issue (Mỗi dòng là 1 Issue) *</label>
+                    <textarea
+                      placeholder="Ví dụ:&#10;Thiết kế giao diện trang chủ&#10;Viết API đồng bộ hóa dữ liệu"
+                      value={bulkText}
+                      onChange={(e) => setBulkText(e.target.value)}
+                      disabled={isRunning}
+                      rows={8}
+                      style={{ fontFamily: "inherit", lineHeight: "1.5" }}
+                      required
+                    />
+                  </div>
 
-              <div className="form-group">
-                <label>Tài khoản Assignee</label>
-                <select
-                  value={assignee}
-                  onChange={(e) => setAssignee(e.target.value)}
-                  disabled={isRunning || loadingUsers}
-                >
-                  <option value="">{loadingUsers ? "Đang tải danh sách..." : "-- Tự động assign cho bạn --"}</option>
-                  {assignableUsers.map(u => (
-                    <option key={u.accountId || u.name} value={u.name || u.accountId}>
-                      {u.displayName} {u.name ? `(${u.name})` : ""}
-                    </option>
-                  ))}
-                </select>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                  Nếu để trống, ứng dụng sẽ gọi API <code>/myself</code> để lấy tên tài khoản của bạn và tự động gắn vào.
-                </div>
-              </div>
+                  <div className="form-group">
+                    <label>Tài khoản Assignee</label>
+                    <select
+                      value={assignee}
+                      onChange={(e) => setAssignee(e.target.value)}
+                      disabled={isRunning || loadingUsers}
+                    >
+                      <option value="">{loadingUsers ? "Đang tải danh sách..." : "-- Tự động assign cho bạn --"}</option>
+                      {assignableUsers.map(u => (
+                        <option key={u.accountId || u.name} value={u.name || u.accountId}>
+                          {u.displayName} {u.name ? `(${u.name})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
-                <input
-                  id="checkbox-autolog"
-                  type="checkbox"
-                  checked={autoLogWork}
-                  onChange={(e) => setAutoLogWork(e.target.checked)}
-                  disabled={isRunning}
-                  style={{ width: "auto", margin: 0, cursor: "pointer" }}
-                />
-                <label htmlFor="checkbox-autolog" style={{ cursor: "pointer", fontWeight: "normal", fontSize: 13, userSelect: "none" }}>
-                  Tự động log work 7h cho mỗi issue sau khi tạo?
-                </label>
-              </div>
+                  <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
+                    <input
+                      id="checkbox-autolog"
+                      type="checkbox"
+                      checked={autoLogWork}
+                      onChange={(e) => setAutoLogWork(e.target.checked)}
+                      disabled={isRunning}
+                      style={{ width: "auto", margin: 0, cursor: "pointer" }}
+                    />
+                    <label htmlFor="checkbox-autolog" style={{ cursor: "pointer", fontWeight: "normal", fontSize: 13, userSelect: "none" }}>
+                      Tự động log work 7h cho mỗi issue sau khi tạo?
+                    </label>
+                  </div>
 
-              <div className="form-group">
-                <label htmlFor="input-start-date-log">
-                  {autoLogWork ? "Ngày bắt đầu log work *" : "Ngày bắt đầu của Task *"}
-                </label>
-                <input
-                  id="input-start-date-log"
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  disabled={isRunning}
-                  required
-                />
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                  {autoLogWork 
-                    ? "Mỗi dòng tóm tắt sẽ tự động được gán Start/End Date và log 7h trên 1 ngày kế tiếp (bỏ qua Thứ Bảy và Chủ Nhật)."
-                    : "Mỗi dòng tóm tắt sẽ tự động được gán Start/End Date trên 1 ngày kế tiếp (bỏ qua Thứ Bảy và Chủ Nhật) nhưng KHÔNG thực hiện log work."}
-                </div>
-              </div>
+                  <div className="form-group">
+                    <label htmlFor="input-start-date-log">
+                      {autoLogWork ? "Ngày bắt đầu log work *" : "Ngày bắt đầu của Task *"}
+                    </label>
+                    <input
+                      id="input-start-date-log"
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      disabled={isRunning}
+                      required
+                    />
+                  </div>
 
-              <div className="form-group">
-                <label>Thời gian Estimate mặc định</label>
-                <input
-                  type="text"
-                  value={estimate}
-                  disabled
-                  style={{ opacity: 0.7, background: "rgba(255,255,255,0.02)" }}
-                />
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                  Mỗi Issue tạo ra sẽ tự động được set Original Estimate là <strong>7 giờ</strong>.
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={isRunning || !bulkText.trim()}
-                style={{ width: "100%", padding: "12px", marginTop: 8 }}
-              >
-                {isRunning ? (
-                  <><span className="spinning">🌀</span> Đang xử lý tự động...</>
-                ) : (
-                  <>🚀 Bắt đầu Tạo Issues</>
-                )}
-              </button>
-            </form>
-            </>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={isRunning || !bulkText.trim()}
+                    style={{ width: "100%", padding: "12px", marginTop: 8 }}
+                  >
+                    {isRunning ? (
+                      <><span className="spinning">🌀</span> Đang xử lý tự động...</>
+                    ) : (
+                      <>🚀 Bắt đầu Tạo Issues</>
+                    )}
+                  </button>
+                </form>
+              </>
             )}
           </div>
 
@@ -644,7 +935,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
               {logs.length === 0 ? (
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", opacity: 0.5, padding: "40px 0" }}>
                   <span style={{ fontSize: 32, marginBottom: 8 }}>📋</span>
-                  <span style={{ fontSize: 13 }}>Danh sách trống. Hãy nhập nội dung và bấm Tạo.</span>
+                  <span style={{ fontSize: 13 }}>Danh sách trống.</span>
                 </div>
               ) : (
                 logs.map((log, idx) => (

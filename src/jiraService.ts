@@ -344,10 +344,11 @@ export async function getAssignableUsers(projectKey: string): Promise<JiraUser[]
 }
 
 /** Lấy metadata tạo issue động cho dự án (Hỗ trợ Jira 9.0+ và các bản cũ hơn) */
-export async function getProjectCreateMeta(projectKey: string): Promise<{ projectId: string; issuetypeId: string } | null> {
+export async function getProjectCreateMeta(projectKey: string, issueTypeName: string = "Task"): Promise<{ projectId: string; issuetypeId: string } | null> {
   try {
     let projectId = "";
     let issuetypeId = "10200"; // default fallback
+
 
     // 1. Lấy Project ID từ /project/{projectKey} (Hoạt động trên mọi phiên bản)
     try {
@@ -364,9 +365,8 @@ export async function getProjectCreateMeta(projectKey: string): Promise<{ projec
       const res = await jiraApi.get(`/issue/createmeta/${projectKey}/issuetypes`);
       const list = Array.isArray(res.data) ? res.data : (res.data.values || []);
       const taskType = list.find((t: any) => 
-        t.name.toLowerCase().includes("task") || 
-        t.name.toLowerCase().includes("công việc") ||
-        t.name.toLowerCase().includes("work")
+        t.name.toLowerCase().includes(issueTypeName.toLowerCase()) || 
+        t.name.toLowerCase() === issueTypeName.toLowerCase()
       ) || list[0];
 
       if (taskType) {
@@ -391,9 +391,8 @@ export async function getProjectCreateMeta(projectKey: string): Promise<{ projec
       const project = legacyRes.data.projects?.[0];
       if (project) {
         const taskType = project.issuetypes.find((t: any) => 
-          t.name.toLowerCase().includes("task") || 
-          t.name.toLowerCase().includes("công việc") ||
-          t.name.toLowerCase().includes("work")
+          t.name.toLowerCase().includes(issueTypeName.toLowerCase()) || 
+          t.name.toLowerCase() === issueTypeName.toLowerCase()
         ) || project.issuetypes[0];
 
         return {
@@ -420,14 +419,15 @@ export async function createIssue(options: {
   summary: string;
   assigneeName?: string;
   originalEstimate?: string;
+  issueTypeName?: string;
   customFields?: Record<string, any>;
 }): Promise<JiraIssue> {
-  const meta = await getProjectCreateMeta(options.projectKey);
+  const meta = await getProjectCreateMeta(options.projectKey, options.issueTypeName || "Task");
 
   const fields: any = {
     project: meta ? { id: meta.projectId } : { key: options.projectKey },
     summary: options.summary,
-    issuetype: meta ? { id: meta.issuetypeId } : { name: "Task" },
+    issuetype: meta ? { id: meta.issuetypeId } : { name: options.issueTypeName || "Task" },
   };
 
   if (options.customFields) {
@@ -463,6 +463,7 @@ export async function createSubTask(options: {
   summary: string;
   assigneeName?: string;
   originalEstimate?: string;
+  customFields?: Record<string, any>;
 }): Promise<JiraIssue> {
   // 1. Fetch project info to get the valid sub-task issue type
   const projRes = await jiraApi.get(`/project/${options.projectKey}`);
@@ -479,6 +480,10 @@ export async function createSubTask(options: {
     summary: options.summary,
     issuetype: { id: subTaskType.id },
   };
+
+  if (options.customFields) {
+    Object.assign(fields, options.customFields);
+  }
 
   if (options.originalEstimate) {
     fields.timetracking = {
