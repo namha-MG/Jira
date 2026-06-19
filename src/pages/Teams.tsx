@@ -8,6 +8,13 @@ import {
   formatSeconds,
   JiraIssue,
   JiraUser,
+  JiraSprint,
+  getBoards,
+  getSprints,
+  createSprint,
+  startSprint,
+  moveIssuesToSprint,
+  getIssuesInSprint
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
@@ -45,7 +52,7 @@ interface SubTaskCreationLog {
   error?: string;
 }
 
-type Tab = "teams" | "members" | "subtasks" | "tasks" | "statistics";
+type Tab = "teams" | "members" | "subtasks" | "tasks" | "statistics" | "sprints";
 
 const STATUS_OPTIONS = [
   { value: "all", label: "Tất cả trạng thái" },
@@ -115,6 +122,33 @@ export default function Teams() {
   const [teamTasks, setTeamTasks] = useState<JiraIssue[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [tasksError, setTasksError] = useState("");
+  // -- Type filter & Selection for tasks
+  const [taskTypes, setTaskTypes] = useState<string[]>([]);
+  const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
+  const [assignSprintModalOpen, setAssignSprintModalOpen] = useState(false);
+  const [assignSprintLoading, setAssignSprintLoading] = useState(false);
+  const [availableSprints, setAvailableSprints] = useState<JiraSprint[]>([]);
+  const [selectedSprintId, setSelectedSprintId] = useState<number | "">("");
+
+  // ── Tab 6: Sprints ────────────────────────────────────────────────────────
+  const [sprintProjectKey, setSprintProjectKey] = useState(JIRA_PROJECTS[0].key);
+  const [sprintBoards, setSprintBoards] = useState<any[]>([]);
+  const [sprintBoardId, setSprintBoardId] = useState<number | "">("");
+  const [sprintsList, setSprintsList] = useState<JiraSprint[]>([]);
+  const [sprintsLoading, setSprintsLoading] = useState(false);
+  
+  const [expandedSprintId, setExpandedSprintId] = useState<number | null>(null);
+  const [sprintTasks, setSprintTasks] = useState<JiraIssue[]>([]);
+  const [sprintTasksLoading, setSprintTasksLoading] = useState(false);
+
+  // Modals for Sprints
+  const [createSprintModalOpen, setCreateSprintModalOpen] = useState(false);
+  const [createSprintForm, setCreateSprintForm] = useState({ name: "", startDate: "", endDate: "", goal: "" });
+  const [createSprintLoading, setCreateSprintLoading] = useState(false);
+
+  const [startSprintModalOpen, setStartSprintModalOpen] = useState<JiraSprint | null>(null);
+  const [startSprintForm, setStartSprintForm] = useState({ name: "", startDate: "", endDate: "", goal: "" });
+  const [startSprintLoading, setStartSprintLoading] = useState(false);
 
   // ── Tab 5: Statistics ─────────────────────────────────────────────────────
   const [statTeamId, setStatTeamId] = useState<number | null>(null);
@@ -454,14 +488,16 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       ? `project in (${taskProjects.map(p => `"${p}"`).join(", ")}) AND `
       : "";
     const statusClause = taskStatusFilter !== "all" ? ` AND status = "${taskStatusFilter}"` : "";
+    const typeClause = taskTypes.length > 0 ? ` AND issuetype in (${taskTypes.map(t => `"${t}"`).join(", ")})` : "";
     const dateClause = useDateFilter
       ? ` AND updated >= "${taskDateFrom}" AND updated <= "${taskDateTo}"`
       : "";
 
-    const jql = `${projectFilter}assignee in (${usernames})${statusClause}${dateClause} ORDER BY updated DESC`;
+    const jql = `${projectFilter}assignee in (${usernames})${statusClause}${typeClause}${dateClause} ORDER BY updated DESC`;
 
     setTasksLoading(true);
     setTasksError("");
+    setSelectedTasks([]);
     setTeamTasks([]);
     try {
       const issues = await getAllIssuesByJql(jql, 500);
@@ -1281,6 +1317,29 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                     })}
                   </div>
                 </div>
+
+                <div className="form-group" style={{ margin: 0, gridColumn: "1 / -1" }}>
+                  <label>Loại Task (Type) - Chọn nhiều</label>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+                    {["Epic", "Story", "Task", "Sub-task", "Bug", "UAT Bug", "Production Bug"].map(type => {
+                      const isActive = taskTypes.includes(type);
+                      return (
+                        <button
+                          key={type}
+                          className={`btn btn-sm ${isActive ? "btn-primary" : "btn-secondary"}`}
+                          onClick={() => {
+                            if (isActive) setTaskTypes(taskTypes.filter(t => t !== type));
+                            else setTaskTypes([...taskTypes, type]);
+                            setTeamTasks([]);
+                          }}
+                          style={{ padding: "4px 12px", borderRadius: 20, fontSize: 12 }}
+                        >
+                          {type}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
@@ -1300,11 +1359,40 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                     <input type="date" value={taskDateTo} onChange={e => setTaskDateTo(e.target.value)} style={{ width: 150 }} />
                   </>
                 )}
+                
+                {teamTasks.length > 0 && selectedTasks.length > 0 && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    style={{ marginLeft: "auto", border: "1px solid var(--accent-blue)", color: "var(--accent-blue)" }}
+                    onClick={async () => {
+                      // Load boards for the first selected project
+                      setAssignSprintLoading(true);
+                      setAssignSprintModalOpen(true);
+                      try {
+                        const boards = await getBoards(taskProjects[0] || JIRA_PROJECTS[0].key);
+                        if (boards.length > 0) {
+                          const sprints = await getSprints(boards[0].id, "active,future");
+                          setAvailableSprints(sprints);
+                        } else {
+                          setAvailableSprints([]);
+                        }
+                      } catch (err) {
+                        console.error(err);
+                        alert("Lỗi tải danh sách Sprint");
+                      } finally {
+                        setAssignSprintLoading(false);
+                      }
+                    }}
+                  >
+                    🚀 Gắn {selectedTasks.length} task vào Sprint
+                  </button>
+                )}
+
                 <button
                   className="btn btn-primary btn-sm"
                   onClick={handleFetchTeamTasks}
                   disabled={tasksLoading || !taskTeamId || taskMembers.length === 0}
-                  style={{ marginLeft: "auto" }}
+                  style={{ marginLeft: selectedTasks.length === 0 ? "auto" : 0 }}
                 >
                   {tasksLoading ? <><span className="spinning">🌀</span> Đang tải...</> : "🔍 Tìm kiếm"}
                 </button>
@@ -1328,6 +1416,16 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                     <thead>
                       <tr style={{ borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>
+                        <th style={{ padding: "8px 12px", width: 40 }}>
+                          <input 
+                            type="checkbox" 
+                            checked={teamTasks.length > 0 && selectedTasks.length === teamTasks.length}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedTasks(teamTasks.map(t => t.key));
+                              else setSelectedTasks([]);
+                            }}
+                          />
+                        </th>
                         <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 500, width: 100 }}>Key</th>
                         <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 500 }}>Tiêu đề</th>
                         <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 500, width: 110 }}>Trạng thái</th>
@@ -1339,14 +1437,25 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                     <tbody>
                       {teamTasks.map(issue => {
                         const isClosed = ["closed","done"].includes(issue.fields.status.name.toLowerCase());
+                        const isSelected = selectedTasks.includes(issue.key);
                         return (
                           <tr
                             key={issue.key}
                             style={{
                               borderBottom: "1px solid var(--border)",
-                              background: isClosed ? "rgba(16,185,129,0.04)" : undefined,
+                              background: isSelected ? "rgba(59, 130, 246, 0.1)" : isClosed ? "rgba(16,185,129,0.04)" : undefined,
                             }}
                           >
+                            <td style={{ padding: "8px 12px" }}>
+                              <input 
+                                type="checkbox" 
+                                checked={isSelected}
+                                onChange={(e) => {
+                                  if (e.target.checked) setSelectedTasks([...selectedTasks, issue.key]);
+                                  else setSelectedTasks(selectedTasks.filter(k => k !== issue.key));
+                                }}
+                              />
+                            </td>
                             <td style={{ padding: "8px 12px" }}>
                               <a
                                 href={`https://20.84.97.109:3033/browse/${issue.key}`}
@@ -1539,6 +1648,436 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
         )}
 
       </div>
+
+      {/* ─── TAB 6: Quản lý Sprint ───────────────────────────────────── */}
+      {activeTab === "sprints" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "0 24px" }}>
+          <div className="settings-section" style={{ marginTop: 24 }}>
+            <div className="settings-section-title">Quản lý Sprint</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label>Dự án</label>
+                <select 
+                  value={sprintProjectKey} 
+                  onChange={async (e) => {
+                    const key = e.target.value;
+                    setSprintProjectKey(key);
+                    setSprintBoards([]);
+                    setSprintsList([]);
+                    setSprintBoardId("");
+                    try {
+                      setSprintsLoading(true);
+                      const boards = await getBoards(key);
+                      setSprintBoards(boards);
+                      if (boards.length > 0) {
+                        setSprintBoardId(boards[0].id);
+                        const sps = await getSprints(boards[0].id);
+                        setSprintsList(sps);
+                      }
+                    } catch (err) {
+                      console.error(err);
+                    } finally {
+                      setSprintsLoading(false);
+                    }
+                  }}
+                >
+                  {JIRA_PROJECTS.map(p => <option key={p.key} value={p.key}>{p.name} ({p.key})</option>)}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label>Board</label>
+                <select 
+                  value={sprintBoardId} 
+                  onChange={async (e) => {
+                    const bid = Number(e.target.value) || "";
+                    setSprintBoardId(bid);
+                    if (bid) {
+                      setSprintsLoading(true);
+                      try {
+                        const sps = await getSprints(bid);
+                        setSprintsList(sps);
+                      } catch (err) {
+                        console.error(err);
+                      } finally {
+                        setSprintsLoading(false);
+                      }
+                    } else {
+                      setSprintsList([]);
+                    }
+                  }}
+                  disabled={sprintBoards.length === 0}
+                >
+                  <option value="">-- Chọn Board --</option>
+                  {sprintBoards.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+              <button
+                className="btn btn-primary"
+                onClick={async () => {
+                  if (!sprintProjectKey) return;
+                  if (sprintBoards.length === 0) {
+                     const boards = await getBoards(sprintProjectKey);
+                     setSprintBoards(boards);
+                  }
+                  setCreateSprintModalOpen(true);
+                }}
+              >
+                ➕ Tạo Sprint mới
+              </button>
+              
+              <button
+                className="btn btn-secondary"
+                onClick={async () => {
+                  if (sprintBoardId) {
+                    setSprintsLoading(true);
+                    try {
+                      const sps = await getSprints(sprintBoardId as number);
+                      setSprintsList(sps);
+                    } catch (err) {
+                      console.error(err);
+                    } finally {
+                      setSprintsLoading(false);
+                    }
+                  }
+                }}
+                disabled={!sprintBoardId || sprintsLoading}
+              >
+                🔄 Làm mới
+              </button>
+            </div>
+          </div>
+
+          {sprintsLoading ? (
+            <div style={{ textAlign: "center", padding: 32 }}>Đang tải danh sách Sprint...</div>
+          ) : sprintsList.length === 0 ? (
+            <div className="empty-state" style={{ padding: "48px 0" }}>
+              <div className="empty-state-icon">🏃</div>
+              <div className="empty-state-title">Chưa có Sprint nào</div>
+              <p className="empty-state-text">Chọn Board khác hoặc tạo Sprint mới.</p>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {sprintsList.map(sprint => {
+                const isActive = sprint.state === "active";
+                const isExpanded = expandedSprintId === sprint.id;
+                return (
+                  <div key={sprint.id} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, padding: 16 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}>
+                          {sprint.name} 
+                          <span className={`badge ${isActive ? "badge-inprogress" : sprint.state === "closed" ? "badge-done" : "badge-todo"}`}>
+                            {sprint.state.toUpperCase()}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
+                          {sprint.startDate && sprint.endDate ? `${new Date(sprint.startDate).toLocaleString()} - ${new Date(sprint.endDate).toLocaleString()}` : "Chưa có thời gian"}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {sprint.state === "future" && (
+                          <button 
+                            className="btn btn-primary btn-sm"
+                            onClick={() => {
+                              setStartSprintModalOpen(sprint);
+                              setStartSprintForm({ name: sprint.name, startDate: "", endDate: "", goal: "" });
+                            }}
+                          >
+                            🚀 Start Sprint
+                          </button>
+                        )}
+                        <button 
+                          className="btn btn-secondary btn-sm"
+                          onClick={async () => {
+                            if (isExpanded) {
+                              setExpandedSprintId(null);
+                            } else {
+                              setExpandedSprintId(sprint.id);
+                              setSprintTasksLoading(true);
+                              try {
+                                const data = await getIssuesInSprint(sprint.id);
+                                setSprintTasks(data.issues);
+                              } catch (err) {
+                                console.error(err);
+                                alert("Lỗi tải danh sách task");
+                              } finally {
+                                setSprintTasksLoading(false);
+                              }
+                            }
+                          }}
+                        >
+                          {isExpanded ? "▲ Ẩn Tasks" : "▼ Xem Tasks"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div style={{ marginTop: 16, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
+                        {sprintTasksLoading ? (
+                          <div style={{ opacity: 0.5 }}>Đang tải...</div>
+                        ) : sprintTasks.length === 0 ? (
+                          <div style={{ opacity: 0.5, fontStyle: "italic" }}>Không có task nào trong Sprint này.</div>
+                        ) : (
+                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                            <thead>
+                              <tr style={{ borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>
+                                <th style={{ padding: "4px 8px", textAlign: "left", width: 100 }}>Key</th>
+                                <th style={{ padding: "4px 8px", textAlign: "left" }}>Tiêu đề</th>
+                                <th style={{ padding: "4px 8px", textAlign: "left", width: 110 }}>Trạng thái</th>
+                                <th style={{ padding: "4px 8px", textAlign: "left", width: 140 }}>Assignee</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sprintTasks.map(issue => (
+                                <tr key={issue.key} style={{ borderBottom: "1px solid var(--border)" }}>
+                                  <td style={{ padding: "4px 8px" }}>
+                                    <a href={`https://20.84.97.109:3033/browse/${issue.key}`} target="_blank" rel="noreferrer" style={{ color: "var(--accent-blue)" }}>
+                                      {issue.key}
+                                    </a>
+                                  </td>
+                                  <td style={{ padding: "4px 8px" }}>{issue.fields.summary}</td>
+                                  <td style={{ padding: "4px 8px" }}><span className={getBadgeClass(issue.fields.status.name)}>{issue.fields.status.name}</span></td>
+                                  <td style={{ padding: "4px 8px" }}>{issue.fields.assignee?.displayName || "—"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── MODALS ───────────────────────────────────────────────────────────── */}
+
+      {/* Assign Sprint Modal */}
+      {assignSprintModalOpen && (
+        <div className="modal-overlay" onClick={() => !assignSprintLoading && setAssignSprintModalOpen(false)}>
+          <div className="modal" style={{ maxWidth: 450 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Gắn {selectedTasks.length} task vào Sprint</div>
+              <button className="modal-close" onClick={() => !assignSprintLoading && setAssignSprintModalOpen(false)}>✕</button>
+            </div>
+            <div className="form-group">
+              <label>Chọn Sprint</label>
+              <select 
+                value={selectedSprintId} 
+                onChange={e => setSelectedSprintId(Number(e.target.value) || "")}
+                disabled={assignSprintLoading}
+              >
+                <option value="">-- Chọn Sprint --</option>
+                {availableSprints.map(s => (
+                  <option key={s.id} value={s.id}>{s.name} ({s.state})</option>
+                ))}
+              </select>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setAssignSprintModalOpen(false)} disabled={assignSprintLoading}>Hủy</button>
+              <button 
+                className="btn btn-primary" 
+                onClick={async () => {
+                  if (!selectedSprintId) return;
+                  setAssignSprintLoading(true);
+                  try {
+                    await moveIssuesToSprint(selectedSprintId as number, selectedTasks);
+                    alert("Gắn task vào sprint thành công!");
+                    setAssignSprintModalOpen(false);
+                    setSelectedTasks([]);
+                  } catch (err: any) {
+                    alert("Lỗi: " + (err.response?.data?.errorMessages?.[0] || err.message));
+                  } finally {
+                    setAssignSprintLoading(false);
+                  }
+                }}
+                disabled={!selectedSprintId || assignSprintLoading}
+              >
+                {assignSprintLoading ? "Đang xử lý..." : "Xác nhận"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Sprint Modal */}
+      {createSprintModalOpen && (
+        <div className="modal-overlay" onClick={() => !createSprintLoading && setCreateSprintModalOpen(false)}>
+          <div className="modal" style={{ maxWidth: 450 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Tạo Sprint mới</div>
+              <button className="modal-close" onClick={() => !createSprintLoading && setCreateSprintModalOpen(false)}>✕</button>
+            </div>
+            <div className="form-group">
+              <label>Tên Sprint <span style={{color:"red"}}>*</span></label>
+              <input type="text" value={createSprintForm.name} onChange={e => setCreateSprintForm({...createSprintForm, name: e.target.value})} placeholder="VD: Sprint 1" />
+            </div>
+            <div className="form-group">
+              <label>Board <span style={{color:"red"}}>*</span></label>
+              <select 
+                value={sprintBoardId} 
+                onChange={e => setSprintBoardId(Number(e.target.value) || "")}
+              >
+                <option value="">-- Chọn Board --</option>
+                {sprintBoards.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                Sprint được tạo sẽ liên kết với Board này.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 12 }}>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>Start Date</label>
+                <input type="datetime-local" value={createSprintForm.startDate} onChange={e => setCreateSprintForm({...createSprintForm, startDate: e.target.value})} />
+              </div>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>End Date</label>
+                <input type="datetime-local" value={createSprintForm.endDate} onChange={e => setCreateSprintForm({...createSprintForm, endDate: e.target.value})} />
+              </div>
+            </div>
+            <div className="form-group">
+              <label>Mục tiêu (Goal)</label>
+              <textarea value={createSprintForm.goal} onChange={e => setCreateSprintForm({...createSprintForm, goal: e.target.value})} rows={3} placeholder="Mục tiêu của sprint..." />
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setCreateSprintModalOpen(false)} disabled={createSprintLoading}>Hủy</button>
+              <button 
+                className="btn btn-primary" 
+                onClick={async () => {
+                  if (!createSprintForm.name || !sprintBoardId) {
+                    alert("Vui lòng nhập Tên Sprint và chọn Board");
+                    return;
+                  }
+                  setCreateSprintLoading(true);
+                  try {
+                    const payload: any = {
+                      name: createSprintForm.name,
+                      originBoardId: sprintBoardId as number
+                    };
+                    if (createSprintForm.startDate) payload.startDate = new Date(createSprintForm.startDate).toISOString();
+                    if (createSprintForm.endDate) payload.endDate = new Date(createSprintForm.endDate).toISOString();
+                    if (createSprintForm.goal) payload.goal = createSprintForm.goal;
+
+                    await createSprint(payload);
+                    setCreateSprintModalOpen(false);
+                    // Refresh sprints if on sprint tab
+                    if (activeTab === "sprints") {
+                      setSprintsLoading(true);
+                      const sps = await getSprints(sprintBoardId as number);
+                      setSprintsList(sps);
+                      setSprintsLoading(false);
+                    }
+                  } catch (err: any) {
+                    alert("Lỗi: " + (err.response?.data?.errorMessages?.[0] || err.message));
+                  } finally {
+                    setCreateSprintLoading(false);
+                  }
+                }}
+                disabled={createSprintLoading}
+              >
+                {createSprintLoading ? "Đang tạo..." : "Tạo Sprint"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Start Sprint Modal */}
+      {startSprintModalOpen && (
+        <div className="modal-overlay" onClick={() => !startSprintLoading && setStartSprintModalOpen(null)}>
+          <div className="modal" style={{ maxWidth: 450 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Bắt đầu Sprint</div>
+              <button className="modal-close" onClick={() => !startSprintLoading && setStartSprintModalOpen(null)}>✕</button>
+            </div>
+            <div className="form-group">
+              <label>Tên Sprint <span style={{color:"red"}}>*</span></label>
+              <input type="text" value={startSprintForm.name} onChange={e => setStartSprintForm({...startSprintForm, name: e.target.value})} />
+            </div>
+            <div style={{ display: "flex", gap: 12 }}>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>Start Date <span style={{color:"red"}}>*</span></label>
+                <input type="datetime-local" value={startSprintForm.startDate} onChange={e => setStartSprintForm({...startSprintForm, startDate: e.target.value})} />
+              </div>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>End Date <span style={{color:"red"}}>*</span></label>
+                <input type="datetime-local" value={startSprintForm.endDate} onChange={e => setStartSprintForm({...startSprintForm, endDate: e.target.value})} />
+              </div>
+            </div>
+            <div className="form-group">
+              <label>Mục tiêu (Goal)</label>
+              <textarea value={startSprintForm.goal} onChange={e => setStartSprintForm({...startSprintForm, goal: e.target.value})} rows={3} />
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setStartSprintModalOpen(null)} disabled={startSprintLoading}>Hủy</button>
+              <button 
+                className="btn btn-primary" 
+                onClick={async () => {
+                  if (!startSprintForm.name || !startSprintForm.startDate || !startSprintForm.endDate) {
+                    alert("Vui lòng điền đủ Tên, Start Date và End Date");
+                    return;
+                  }
+                  if (!sprintBoardId) {
+                     alert("Không xác định được Board ID để bắt đầu Sprint.");
+                     return;
+                  }
+                  setStartSprintLoading(true);
+                  try {
+                    // Cần format date dạng dd/MMM/yyyy hh:mm a theo như CURL mẫu: "15/Jun/2026 07:02 PM"
+                    const formatToGreenhopperDate = (dString: string) => {
+                       const d = new Date(dString);
+                       const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                       const dd = String(d.getDate()).padStart(2, '0');
+                       const mmm = months[d.getMonth()];
+                       const yyyy = d.getFullYear();
+                       let hh = d.getHours();
+                       const mm = String(d.getMinutes()).padStart(2, '0');
+                       const ampm = hh >= 12 ? 'PM' : 'AM';
+                       hh = hh % 12;
+                       if (hh === 0) hh = 12;
+                       const hhStr = String(hh).padStart(2, '0');
+                       return `${dd}/${mmm}/${yyyy} ${hhStr}:${mm} ${ampm}`;
+                    };
+
+                    const payload: any = {
+                      name: startSprintForm.name,
+                      startDate: formatToGreenhopperDate(startSprintForm.startDate),
+                      endDate: formatToGreenhopperDate(startSprintForm.endDate),
+                      rapidViewId: sprintBoardId as number
+                    };
+                    if (startSprintForm.goal) payload.goal = startSprintForm.goal;
+
+                    await startSprint(startSprintModalOpen.id, payload);
+                    setStartSprintModalOpen(null);
+                    
+                    if (activeTab === "sprints") {
+                      setSprintsLoading(true);
+                      const sps = await getSprints(sprintBoardId as number);
+                      setSprintsList(sps);
+                      setSprintsLoading(false);
+                    }
+                  } catch (err: any) {
+                    alert("Lỗi: " + (err.response?.data?.errorMessages?.[0] || err.message));
+                  } finally {
+                    setStartSprintLoading(false);
+                  }
+                }}
+                disabled={startSprintLoading}
+              >
+                {startSprintLoading ? "Đang xử lý..." : "🚀 Start"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

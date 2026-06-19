@@ -24,11 +24,34 @@ const jiraApi = axios.create({
   },
 });
 
+export const jiraAgileApi = axios.create({
+  baseURL: "/jira-api/rest/agile/1.0",
+  headers: {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    "X-Atlassian-Token": "no-check",
+  },
+});
+
+export const greenhopperApi = axios.create({
+  baseURL: "/jira-api/rest/greenhopper/1.0",
+  headers: {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    "X-Atlassian-Token": "no-check",
+  },
+});
+
 jiraApi.interceptors.request.use((config) => {
-  config.headers = {
-    ...config.headers,
-    ...getAuthHeader(),
-  } as typeof config.headers;
+  config.headers = { ...config.headers, ...getAuthHeader() } as typeof config.headers;
+  return config;
+});
+jiraAgileApi.interceptors.request.use((config) => {
+  config.headers = { ...config.headers, ...getAuthHeader() } as typeof config.headers;
+  return config;
+});
+greenhopperApi.interceptors.request.use((config) => {
+  config.headers = { ...config.headers, ...getAuthHeader() } as typeof config.headers;
   return config;
 });
 
@@ -746,5 +769,51 @@ export async function updateIssueEstimate(issueKey: string, originalEstimate: st
 /** Raw PUT to update an issue */
 export async function updateIssue(issueKey: string, payload: any): Promise<any> {
   const res = await jiraApi.put(`/issue/${issueKey}`, payload);
+  return res.data;
+}
+
+// ===============================================
+// AGILE & GREENHOPPER API FUNCTIONS
+// ===============================================
+
+export async function getBoards(projectKeyOrId?: string): Promise<any[]> {
+  const params: any = {};
+  if (projectKeyOrId) params.projectKeyOrId = projectKeyOrId;
+  const res = await jiraAgileApi.get("/board", { params });
+  return res.data.values || [];
+}
+
+export async function getSprints(boardId: number, state?: string): Promise<JiraSprint[]> {
+  const params: any = {};
+  if (state) params.state = state;
+  const res = await jiraAgileApi.get(`/board/${boardId}/sprint`, { params });
+  return res.data.values || [];
+}
+
+export async function getIssuesInSprint(sprintId: number, startAt: number = 0, maxResults: number = 100): Promise<{ issues: JiraIssue[]; total: number }> {
+  const fields = "summary,status,priority,assignee,timetracking,aggregatetimespent,aggregatetimeoriginalestimate,aggregateprogress,worklog,created,updated,duedate,project,issuetype,customfield_10300,customfield_10302,parent,attachment";
+  const res = await jiraAgileApi.get(`/sprint/${sprintId}/issue`, {
+    params: { startAt, maxResults, fields }
+  });
+  return { issues: res.data.issues || [], total: res.data.total || 0 };
+}
+
+export async function createSprint(payload: { name: string; startDate?: string; endDate?: string; goal?: string; originBoardId: number }): Promise<JiraSprint> {
+  const res = await jiraAgileApi.post("/sprint", payload);
+  return res.data;
+}
+
+export async function startSprint(sprintId: number, payload: { name: string; startDate: string; endDate: string; goal?: string; rapidViewId: number }): Promise<any> {
+  // Use Greenhopper API as requested
+  const reqPayload = {
+    ...payload,
+    sprintId,
+  };
+  const res = await greenhopperApi.put(`/sprint/${sprintId}/start`, reqPayload);
+  return res.data;
+}
+
+export async function moveIssuesToSprint(sprintId: number, issues: string[]): Promise<any> {
+  const res = await jiraAgileApi.post(`/sprint/${sprintId}/issue`, { issues });
   return res.data;
 }
