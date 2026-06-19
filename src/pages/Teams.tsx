@@ -748,7 +748,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {/* Header */}
       <div className="page-header">
         <div className="page-title-group">
