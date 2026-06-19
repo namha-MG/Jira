@@ -721,6 +721,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
     { id: "subtasks", icon: "🤖", label: "Tạo Sub-tasks AI" },
     { id: "tasks",    icon: "📋", label: "Danh sách Task" },
     { id: "statistics", icon: "📈", label: "Thống kê" },
+    { id: "sprints",  icon: "🏃", label: "Quản lý Sprint" },
   ];
 
   if (!isConfigured) {
@@ -1370,12 +1371,20 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                       setAssignSprintModalOpen(true);
                       try {
                         const boards = await getBoards(taskProjects[0] || JIRA_PROJECTS[0].key);
-                        if (boards.length > 0) {
-                          const sprints = await getSprints(boards[0].id, "active,future");
-                          setAvailableSprints(sprints);
-                        } else {
-                          setAvailableSprints([]);
+                        let allSprints: JiraSprint[] = [];
+                        for (const b of boards) {
+                          try {
+                            const sps = await getSprints(b.id, "active,future");
+                            // Thêm tên board vào tên sprint để dễ phân biệt nếu cần
+                            const mappedSps = sps.map(s => ({ ...s, name: `${s.name} (${b.name})` }));
+                            allSprints = [...allSprints, ...mappedSps];
+                          } catch (err) {
+                            // ignore errors for individual boards (some might not support sprints)
+                          }
                         }
+                        // Lọc trùng lặp sprintId
+                        const uniqueSprints = Array.from(new Map(allSprints.map(s => [s.id, s])).values());
+                        setAvailableSprints(uniqueSprints);
                       } catch (err) {
                         console.error(err);
                         alert("Lỗi tải danh sách Sprint");
