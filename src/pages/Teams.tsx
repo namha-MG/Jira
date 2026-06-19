@@ -784,7 +784,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
         ))}
       </div>
 
-      <div className="page-body" style={{ overflowY: "auto" }}>
+      <div className="page-body" style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
 
         {/* ─── TAB 1: Quản lý Teams ─────────────────────────────────────────── */}
         {activeTab === "teams" && (
