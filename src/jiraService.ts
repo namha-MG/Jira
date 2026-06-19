@@ -698,3 +698,23 @@ export async function getRecentNotificationsForUser(): Promise<JiraNotification[
     return [];
   }
 }
+
+/** Upload attachment to an issue */
+export async function uploadAttachment(issueKey: string, file: File): Promise<any> {
+  const formData = new FormData();
+  formData.append("file", file, file.name);
+
+  const res = await jiraApi.post(`/issue/${issueKey}/attachments`, formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+      "X-Atlassian-Token": "no-check",
+    },
+  });
+  return res.data; // usually an array of attachment objects
+}
+
+/** Add a comment to an issue */
+export async function addComment(issueKey: string, body: string): Promise<any> {
+  const res = await jiraApi.post(`/issue/${issueKey}/comment`, { body });
+  return res.data;
+}

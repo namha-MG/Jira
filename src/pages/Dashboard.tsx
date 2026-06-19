@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 import {
-  getMyIssues, JiraIssue, formatSeconds, getTransitions, transitionIssue, getJiraFields, generateAiOutput
+  getMyIssues, JiraIssue, formatSeconds, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
@@ -62,6 +62,11 @@ export default function Dashboard() {
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [closableTargets, setClosableTargets] = useState<JiraIssue[]>([]);
   const [selectedTargets, setSelectedTargets] = useState<Set<string>>(new Set());
+
+  const [commentIssueKey, setCommentIssueKey] = useState<string | null>(null);
+  const [commentText, setCommentText] = useState("");
+  const [commentFile, setCommentFile] = useState<File | null>(null);
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
 
@@ -249,6 +254,41 @@ export default function Dashboard() {
     setTransitionStatus("");
     alert(`✅ Hoàn thành! Đã chuyển trạng thái thành công cho ${successCount}/${targetsToClose.length} task.`);
     fetchData(); // Refresh dashboard
+  };
+
+  const handleCommentSubmit = async () => {
+    if (!commentIssueKey) return;
+    if (!commentText.trim() && !commentFile) {
+      alert("Vui lòng nhập nội dung comment hoặc chọn ảnh.");
+      return;
+    }
+    
+    setIsSubmittingComment(true);
+    try {
+      let finalCommentText = commentText;
+      
+      if (commentFile) {
+        // Upload file first
+        const uploadRes = await uploadAttachment(commentIssueKey, commentFile);
+        const filename = uploadRes && uploadRes.length > 0 && uploadRes[0].filename 
+                         ? uploadRes[0].filename 
+                         : commentFile.name;
+        
+        // Append image reference using Jira markup
+        finalCommentText += `\n\n!${filename}!`;
+      }
+      
+      await addComment(commentIssueKey, finalCommentText);
+      alert("Đã thêm comment thành công!");
+      setCommentIssueKey(null);
+      setCommentText("");
+      setCommentFile(null);
+    } catch (e: any) {
+      console.error("Failed to add comment:", e);
+      alert("Lỗi khi thêm comment: " + (e.response?.data?.errorMessages?.[0] || e.message));
+    } finally {
+      setIsSubmittingComment(false);
+    }
   };
 
   const fetchData = useCallback(async () => {
@@ -673,6 +713,51 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Comment Modal */}
+        {commentIssueKey && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+            <div style={{ background: "var(--bg-secondary)", borderRadius: 16, width: 500, maxWidth: "90vw", display: "flex", flexDirection: "column", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}>
+              <div style={{ padding: 20, borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h3 style={{ margin: 0, fontSize: 18, color: "var(--text-primary)" }}>Thêm Comment - {commentIssueKey}</h3>
+                <button onClick={() => { setCommentIssueKey(null); setCommentText(""); setCommentFile(null); }} className="btn btn-ghost btn-sm">❌</button>
+              </div>
+              <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+                <div className="form-group">
+                  <label>Nội dung Comment</label>
+                  <textarea 
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    rows={4}
+                    placeholder="Nhập nội dung..."
+                    style={{ width: "100%", fontFamily: "inherit" }}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Đính kèm ảnh (Tùy chọn)</label>
+                  <input 
+                    type="file" 
+                    accept="image/*"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files.length > 0) {
+                        setCommentFile(e.target.files[0]);
+                      } else {
+                        setCommentFile(null);
+                      }
+                    }}
+                  />
+                  {commentFile && <div style={{ fontSize: 12, marginTop: 4, color: "var(--accent-green)" }}>Đã chọn: {commentFile.name}</div>}
+                </div>
+              </div>
+              <div style={{ padding: 20, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "flex-end", gap: 12 }}>
+                <button onClick={() => { setCommentIssueKey(null); setCommentText(""); setCommentFile(null); }} className="btn btn-secondary">Hủy</button>
+                <button onClick={handleCommentSubmit} className="btn btn-primary" disabled={isSubmittingComment}>
+                  {isSubmittingComment ? "Đang gửi..." : "Gửi Comment"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {loading ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div className="stats-grid">
@@ -1015,6 +1100,7 @@ export default function Dashboard() {
                       <th>Estimate</th>
                       <th>Logged</th>
                       <th>%</th>
+                      <th>Hành động</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1055,12 +1141,22 @@ export default function Dashboard() {
                               </>
                             ) : <span style={{ color: "var(--text-muted)", fontSize: 11 }}>—</span>}
                           </td>
+                          <td style={{ textAlign: "center", width: 60 }}>
+                            <button 
+                              className="btn btn-ghost btn-sm" 
+                              onClick={() => setCommentIssueKey(issue.key)}
+                              title="Thêm Comment"
+                              style={{ padding: "4px 8px", fontSize: 14 }}
+                            >
+                              💬
+                            </button>
+                          </td>
                         </tr>
                       );
                     })}
                     {recentIssues.length === 0 && (
                       <tr>
-                        <td colSpan={7}>
+                        <td colSpan={8}>
                           <div className="empty-state" style={{ padding: 24 }}>
                             <div>Không có issues nào được gán cho bạn</div>
                           </div>
