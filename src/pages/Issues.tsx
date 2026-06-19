@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import {
   getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, updateIssueEstimate
 } from "../jiraService";
+import { jiraApi } from "../api";
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
 
@@ -1309,7 +1310,28 @@ export default function Issues() {
                         transitionFields[outputFieldId] = finalOutput;
                       }
 
-                      await transitionIssue(resolveModalOpen.key, toFixed.id, transitionFields, resolveComment.trim() || undefined);
+                      try {
+                        await transitionIssue(resolveModalOpen.key, toFixed.id, transitionFields, resolveComment.trim() || undefined);
+                      } catch (transitionErr: any) {
+                        const errors = transitionErr.response?.data?.errors || {};
+                        const hasScreenError = Object.values(errors).some((msg: any) => typeof msg === 'string' && msg.includes("appropriate screen"));
+                        if (hasScreenError) {
+                          // Try without fields
+                          await transitionIssue(resolveModalOpen.key, toFixed.id, undefined, resolveComment.trim() || undefined);
+                          // Try to update Output field via PUT instead of transition
+                          if (outputFieldId) {
+                            try {
+                              await jiraApi.put(`/issue/${resolveModalOpen.key}`, {
+                                fields: { [outputFieldId]: finalOutput }
+                              });
+                            } catch (putErr) {
+                              console.warn("Could not PUT output field", putErr);
+                            }
+                          }
+                        } else {
+                          throw transitionErr;
+                        }
+                      }
                     }
                     
                     // Chuyển sang Commit (nếu có) - CHỈ DÀNH CHO BUG
