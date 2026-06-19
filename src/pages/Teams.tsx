@@ -124,6 +124,7 @@ export default function Teams() {
   const [tasksError, setTasksError] = useState("");
   // -- Type filter & Selection for tasks
   const [taskTypes, setTaskTypes] = useState<string[]>([]);
+  const [taskSprintFilter, setTaskSprintFilter] = useState("all");
   const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
   const [assignSprintModalOpen, setAssignSprintModalOpen] = useState(false);
   const [assignSprintLoading, setAssignSprintLoading] = useState(false);
@@ -489,11 +490,14 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       : "";
     const statusClause = taskStatusFilter !== "all" ? ` AND status = "${taskStatusFilter}"` : "";
     const typeClause = taskTypes.length > 0 ? ` AND issuetype in (${taskTypes.map(t => `"${t}"`).join(", ")})` : "";
+    let sprintClause = "";
+    if (taskSprintFilter === "has_sprint") sprintClause = " AND Sprint is not EMPTY";
+    else if (taskSprintFilter === "no_sprint") sprintClause = " AND Sprint is EMPTY";
     const dateClause = useDateFilter
       ? ` AND updated >= "${taskDateFrom}" AND updated <= "${taskDateTo}"`
       : "";
 
-    const jql = `${projectFilter}assignee in (${usernames})${statusClause}${typeClause}${dateClause} ORDER BY updated DESC`;
+    const jql = `${projectFilter}assignee in (${usernames})${statusClause}${typeClause}${sprintClause}${dateClause} ORDER BY updated DESC`;
 
     setTasksLoading(true);
     setTasksError("");
@@ -1296,6 +1300,15 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                   </select>
                 </div>
 
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Trạng thái Sprint</label>
+                  <select value={taskSprintFilter} onChange={e => setTaskSprintFilter(e.target.value)}>
+                    <option value="all">Tất cả</option>
+                    <option value="has_sprint">Đã có Sprint</option>
+                    <option value="no_sprint">Chưa có Sprint</option>
+                  </select>
+                </div>
+
                 <div className="form-group" style={{ margin: 0, gridColumn: "1 / -1" }}>
                   <label>Dự án (có thể chọn nhiều)</label>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
@@ -1831,7 +1844,8 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                         ) : sprintTasks.length === 0 ? (
                           <div style={{ opacity: 0.5, fontStyle: "italic" }}>Không có task nào trong Sprint này.</div>
                         ) : (
-                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                          <div style={{ maxHeight: 350, overflowY: "auto", paddingRight: 8 }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                             <thead>
                               <tr style={{ borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>
                                 <th style={{ padding: "4px 8px", textAlign: "left", width: 100 }}>Key</th>
@@ -1855,6 +1869,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                               ))}
                             </tbody>
                           </table>
+                        </div>
                         )}
                       </div>
                     )}
