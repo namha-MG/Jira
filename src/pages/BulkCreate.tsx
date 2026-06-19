@@ -291,9 +291,11 @@ export default function BulkCreate() {
              return copy;
           });
 
-          let currentSubIndex = logIndex + 1;
-          for (const sub of subtasksToCreate) {
-             setLogs(prev => prev.map((l, idx) => idx === currentSubIndex ? { ...l, status: "processing" } : l));
+          for (let sIdx = 0; sIdx < subtasksToCreate.length; sIdx++) {
+             const sub = subtasksToCreate[sIdx];
+             const targetIndex = logIndex + 1 + sIdx;
+             
+             setLogs(prev => prev.map((l, idx) => idx === targetIndex ? { ...l, status: "processing" } : l));
              
              let subCustomFields: any = {};
              if (formattedStartD) {
@@ -333,11 +335,10 @@ export default function BulkCreate() {
                   }
                 }
 
-                setLogs(prev => prev.map((l, idx) => idx === currentSubIndex ? { ...l, status: "success", key: sCreated.key } : l));
+                setLogs(prev => prev.map((l, idx) => idx === targetIndex ? { ...l, status: "success", key: sCreated.key } : l));
              } catch (e: any) {
-                setLogs(prev => prev.map((l, idx) => idx === currentSubIndex ? { ...l, status: "error", errorMsg: "Lỗi tạo sub-task" } : l));
+                setLogs(prev => prev.map((l, idx) => idx === targetIndex ? { ...l, status: "error", errorMsg: "Lỗi tạo sub-task" } : l));
              }
-             currentSubIndex++;
           }
           logIndexOffset += subtasksToCreate.length;
         }
