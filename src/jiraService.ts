@@ -734,3 +734,9 @@ export async function updateIssueEstimate(issueKey: string, originalEstimate: st
   });
   return res.data;
 }
+
+/** Raw PUT to update an issue */
+export async function updateIssue(issueKey: string, payload: any): Promise<any> {
+  const res = await jiraApi.put(`/issue/${issueKey}`, payload);
+  return res.data;
+}

@@ -1,8 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, updateIssueEstimate
+  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, updateIssueEstimate, updateIssue
 } from "../jiraService";
-import { jiraApi } from "../api";
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
 
@@ -1321,7 +1320,7 @@ export default function Issues() {
                           // Try to update Output field via PUT instead of transition
                           if (outputFieldId) {
                             try {
-                              await jiraApi.put(`/issue/${resolveModalOpen.key}`, {
+                              await updateIssue(resolveModalOpen.key, {
                                 fields: { [outputFieldId]: finalOutput }
                               });
                             } catch (putErr) {
