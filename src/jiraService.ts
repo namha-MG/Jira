@@ -185,7 +185,7 @@ export async function getIssuesByProject(
   const fields = options.fields || [
     "summary", "status", "priority", "assignee", "reporter",
     "timetracking", "worklog", "created", "updated", "duedate",
-    "project", "issuetype", "description", "customfield_10300",
+    "project", "issuetype", "description", "customfield_10300", "attachment",
   ];
 
   const res = await jiraApi.get("/search", {
@@ -228,7 +228,7 @@ export async function getMyIssues(options: {
     params: {
       jql,
       maxResults,
-      fields: "summary,status,priority,assignee,timetracking,aggregatetimespent,aggregatetimeoriginalestimate,aggregateprogress,worklog,created,updated,duedate,project,issuetype,customfield_10300,customfield_10302,parent",
+      fields: "summary,status,priority,assignee,timetracking,aggregatetimespent,aggregatetimeoriginalestimate,aggregateprogress,worklog,created,updated,duedate,project,issuetype,customfield_10300,customfield_10302,parent,attachment",
     },
   });
 
@@ -246,7 +246,7 @@ export async function getAllIssuesByJql(
   const fields = [
     "summary", "status", "priority", "assignee", "reporter",
     "timetracking", "worklog", "created", "updated", "duedate",
-    "project", "issuetype", "description", "customfield_10300", "customfield_10302", "parent", "subtasks"
+    "project", "issuetype", "description", "customfield_10300", "customfield_10302", "parent", "subtasks", "attachment"
   ];
   let allIssues: JiraIssue[] = [];
   let startAt = 0;
