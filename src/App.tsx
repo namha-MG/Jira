@@ -10,6 +10,7 @@ import Settings from "./pages/Settings";
 import BulkCreate from "./pages/BulkCreate";
 import JobLogs from "./pages/JobLogs";
 import Teams from "./pages/Teams";
+import UnassignedIssues from "./pages/UnassignedIssues";
 
 export default function App() {
   const isAuthenticated = useIsAuthenticated();
@@ -46,6 +47,7 @@ export default function App() {
       case "bulkcreate":  return <BulkCreate />;
       case "teams":       return <Teams />;
       case "joblogs":     return <JobLogs />;
+      case "unassigned":  return <UnassignedIssues />;
       case "settings":    return <Settings />;
       default:            return <Dashboard />;
     }

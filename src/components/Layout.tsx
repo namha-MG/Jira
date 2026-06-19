@@ -14,6 +14,7 @@ const navItems: { id: Page; icon: string; label: string }[] = [
   { id: "issues",     icon: "📋", label: "Danh sách Issues" },
   { id: "logwork",    icon: "⏱️", label: "Log Công Việc" },
   { id: "bulkcreate", icon: "➕", label: "Tạo Issue Nhanh" },
+  { id: "unassigned", icon: "👤", label: "Task Chưa Gán" },
   { id: "teams",      icon: "🏢", label: "Quản lý Team" },
   { id: "joblogs",    icon: "🤖", label: "Lịch sử Job Tự động" },
   { id: "settings",   icon: "⚙️", label: "Cài đặt" },

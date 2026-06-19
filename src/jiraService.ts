@@ -441,8 +441,12 @@ export async function createIssue(options: {
     };
   }
 
-  if (options.assigneeName && options.assigneeName.trim()) {
-    fields.assignee = { name: options.assigneeName.trim() };
+  if (options.assigneeName !== undefined) {
+    if (options.assigneeName.trim()) {
+      fields.assignee = { name: options.assigneeName.trim() };
+    }
+    // If it's an empty string, we explicitly DO NOT auto-assign to current user.
+    // We let Jira use the project's default (which is usually Unassigned).
   } else {
     try {
       const me = await getCurrentUser();
@@ -492,8 +496,11 @@ export async function createSubTask(options: {
     };
   }
 
-  if (options.assigneeName && options.assigneeName.trim()) {
-    fields.assignee = { name: options.assigneeName.trim() };
+  if (options.assigneeName !== undefined) {
+    if (options.assigneeName.trim()) {
+      fields.assignee = { name: options.assigneeName.trim() };
+    }
+    // If it's an empty string, we explicitly DO NOT auto-assign to current user.
   } else {
     try {
       const me = await getCurrentUser();

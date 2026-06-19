@@ -176,7 +176,6 @@ export default function BulkCreate() {
       try {
         const issueType = row["Issue Type"] || "Task";
         const epicName = row["Epic Name"];
-        const rowAssignee = row["Assignee"] || assignee;
         const startD = row["Custom field (Start Date (Time))"];
         const endD = row["Custom field (Due Date (Time))"];
         const origEstimate = row["Original Estimate"];
@@ -200,7 +199,7 @@ export default function BulkCreate() {
           projectKey: selectedProject,
           summary: summary,
           issueTypeName: issueType,
-          assigneeName: rowAssignee || undefined,
+          assigneeName: row["Assignee"] !== undefined ? row["Assignee"] : "",
           originalEstimate: origEstimate,
           customFields
         });
@@ -312,7 +311,7 @@ export default function BulkCreate() {
                   parentKey: parentKey,
                   projectKey: selectedProject,
                   summary: sub.title,
-                  assigneeName: rowAssignee || undefined,
+                  assigneeName: row["Assignee"] !== undefined ? row["Assignee"] : "",
                   originalEstimate: sub.est,
                   customFields: Object.keys(subCustomFields).length > 0 ? subCustomFields : undefined
                 });
@@ -407,7 +406,7 @@ export default function BulkCreate() {
         const created: JiraIssue = await createIssue({
           projectKey: selectedProject,
           summary: summaries[i].summary,
-          assigneeName: summaries[i].assignee || undefined,
+          assigneeName: summaries[i].assignee ? summaries[i].assignee : undefined,
           originalEstimate: estimate,
           customFields: {
             "customfield_10300": startDateStr,
