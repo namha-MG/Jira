@@ -11,6 +11,30 @@ interface CreationLog {
   logDateText?: string;
 }
 
+const parseExcelDate = (val: any): Date | null => {
+  if (!val) return null;
+  if (val instanceof Date && !isNaN(val.getTime())) return val;
+  if (typeof val === "number") {
+    return new Date(Math.round((val - 25569) * 86400 * 1000));
+  }
+  if (typeof val === "string") {
+    const dObj = new Date(val);
+    if (!isNaN(dObj.getTime())) return dObj;
+    
+    const parts = val.split(/[-/]/);
+    if (parts.length >= 3) {
+      const p1 = parseInt(parts[0], 10);
+      const p2 = parseInt(parts[1], 10);
+      const p3 = parseInt(parts[2].substring(0, 4), 10);
+      
+      if (p3 >= 1000 && p1 <= 31 && p2 <= 12) {
+        return new Date(p3, p2 - 1, p1);
+      }
+    }
+  }
+  return null;
+};
+
 export default function BulkCreate() {
   const [selectedProject, setSelectedProject] = useState(JIRA_PROJECTS[0].key);
   const [bulkText, setBulkText] = useState("");
@@ -62,11 +86,8 @@ export default function BulkCreate() {
     return getNextWorkday(d);
   };
 
-  const calculateWorkingDays = (startStr: string, endStr: string) => {
-    if (!startStr || !endStr) return 0;
-    const s = new Date(startStr);
-    const e = new Date(endStr);
-    if (isNaN(s.getTime()) || isNaN(e.getTime())) return 0;
+  const calculateWorkingDays = (s: Date | null, e: Date | null) => {
+    if (!s || !e || isNaN(s.getTime()) || isNaN(e.getTime())) return 0;
     let days = 0;
     let curr = new Date(s);
     while (curr <= e) {
@@ -163,13 +184,15 @@ export default function BulkCreate() {
         const customFields: any = {};
         let formattedStartD = "";
         let formattedEndD = "";
+        const parsedStart = parseExcelDate(startD);
+        const parsedEnd = parseExcelDate(endD);
 
-        if (startD) {
-          formattedStartD = formatJiraIsoDate(new Date(startD));
+        if (parsedStart) {
+          formattedStartD = formatJiraIsoDate(parsedStart);
           customFields["customfield_10300"] = formattedStartD;
         }
-        if (endD) {
-          formattedEndD = formatJiraIsoDate(new Date(endD), 17, 0);
+        if (parsedEnd) {
+          formattedEndD = formatJiraIsoDate(parsedEnd, 17, 0);
           customFields["customfield_10302"] = formattedEndD;
         }
 
@@ -201,7 +224,7 @@ export default function BulkCreate() {
 
         const parentKey = created.key;
         
-        let subtasksToCreate = subTasksRaw.filter(s => s["Epic Name"] === epicName).map(s => ({ title: s["Summary"], est: s["Original Estimate"] || "0h" }));
+        let subtasksToCreate = subTasksRaw.filter(s => epicName && s["Epic Name"] === epicName).map(s => ({ title: s["Summary"], est: s["Original Estimate"] || "0h" }));
         
         if (issueType === "Story") {
            const baTasks = BA_TEMPLATES.map(t => ({ title: t, est: "2h" }));
@@ -210,7 +233,7 @@ export default function BulkCreate() {
 
            const geminiKey = localStorage.getItem("gemini_api_key");
            if (geminiKey) {
-             const prompt = (startD && endD) 
+             const prompt = (parsedStart && parsedEnd) 
                ? `Bạn là một lập trình viên. Hãy phân tích Story có tiêu đề "${summary}" thành các sub-task nhỏ cho lập trình viên (Dev). Trả về danh sách thuần túy, mỗi dòng 1 task, không markdown.`
                : `Bạn là một lập trình viên. Hãy phân tích Story có tiêu đề "${summary}" thành các sub-task nhỏ cho lập trình viên Junior (Dev) kèm theo estimate bằng giờ (h). Trả về danh sách thuần túy, mỗi dòng định dạng: Tên sub-task | Xh (ví dụ: Viết API | 4h). Không markdown.`;
              
@@ -225,7 +248,7 @@ export default function BulkCreate() {
                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
                    if (text) {
                      const lines = text.split("\n").filter((l: string) => l.trim().length > 3);
-                     if (startD && endD) {
+                     if (parsedStart && parsedEnd) {
                        devTasks = lines.map((l: string) => ({ title: `[Dev] ${l.replace(/^[-*]\s*/, '').trim()}`, est: "2h" }));
                      } else {
                        devTasks = lines.map((l: string) => {
@@ -243,8 +266,8 @@ export default function BulkCreate() {
              }
            }
 
-          if (startD && endD) {
-            const workingDays = calculateWorkingDays(startD, endD);
+          if (parsedStart && parsedEnd) {
+            const workingDays = calculateWorkingDays(parsedStart, parsedEnd);
             const totalHours = workingDays * 8;
             if (totalHours > 0) {
                const baEst = Math.round(totalHours / baTasks.length) + "h";
