@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment
+  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, updateIssueEstimate
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
@@ -63,6 +63,11 @@ export default function Issues() {
   const [commentText, setCommentText] = useState("");
   const [commentFile, setCommentFile] = useState<File | null>(null);
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
+
+  // Edit Estimate states
+  const [estimateModalOpen, setEstimateModalOpen] = useState<{ key: string; summary: string; estimate: string } | null>(null);
+  const [newEstimate, setNewEstimate] = useState("");
+  const [updatingEstimate, setUpdatingEstimate] = useState(false);
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
 
@@ -272,6 +277,26 @@ export default function Issues() {
       alert("Lỗi khi thêm comment: " + (e.response?.data?.errorMessages?.[0] || e.message));
     } finally {
       setIsSubmittingComment(false);
+    }
+  };
+
+  const handleEstimateSubmit = async () => {
+    if (!estimateModalOpen) return;
+    try {
+      setUpdatingEstimate(true);
+      await updateIssueEstimate(estimateModalOpen.key, newEstimate);
+      alert("Cập nhật estimate thành công!");
+      setEstimateModalOpen(null);
+      fetchIssues(); // Refresh list
+      
+      if (selectedIssue && (selectedIssue.key === estimateModalOpen.key || selectedIssue.fields.subtasks?.some(s => s.key === estimateModalOpen.key))) {
+         const freshIssue = await getIssue(selectedIssue.key);
+         setSelectedIssue(freshIssue);
+      }
+    } catch (e: any) {
+      alert("Lỗi khi cập nhật estimate: " + (e.response?.data?.errorMessages?.[0] || e.message));
+    } finally {
+      setUpdatingEstimate(false);
     }
   };
 
@@ -647,7 +672,20 @@ export default function Issues() {
                       </td>
                       <td style={{ fontSize: 11, color: "var(--text-primary)" }}>{startDateStr}</td>
                       <td style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 500 }}>
-                        {est ? formatSeconds(est) : <span style={{ color: "var(--text-muted)" }}>—</span>}
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          {est ? formatSeconds(est) : <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>—</span>}
+                          <button 
+                            className="btn btn-ghost btn-sm" 
+                            style={{ padding: "0 4px", height: 20, fontSize: 11, minHeight: 20 }}
+                            onClick={() => {
+                              setEstimateModalOpen({ key: issue.key, summary: issue.fields.summary, estimate: est ? formatSeconds(est) : "" });
+                              setNewEstimate(est ? formatSeconds(est) : "");
+                            }}
+                            title="Sửa Estimate"
+                          >
+                            ✏️
+                          </button>
+                        </div>
                       </td>
                       <td style={{ fontSize: 12, color: "var(--accent-green)", fontWeight: 700 }}>
                         {log ? formatSeconds(log) : <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>—</span>}
@@ -1361,6 +1399,39 @@ export default function Issues() {
               <button className="btn btn-secondary" onClick={() => { setCommentIssueKey(null); setCommentText(""); setCommentFile(null); }} disabled={isSubmittingComment}>Hủy</button>
               <button onClick={handleCommentSubmit} className="btn btn-primary" disabled={isSubmittingComment}>
                 {isSubmittingComment ? "Đang gửi..." : "Gửi Comment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Estimate Modal */}
+      {estimateModalOpen && (
+        <div className="modal-overlay" onClick={() => !updatingEstimate && setEstimateModalOpen(null)}>
+          <div className="modal" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Cập nhật Estimate - {estimateModalOpen.key}</div>
+              <button className="modal-close" onClick={() => !updatingEstimate && setEstimateModalOpen(null)}>✕</button>
+            </div>
+            <div className="form-group">
+              <label>Estimate hiện tại: {estimateModalOpen.estimate || "Trống"}</label>
+              <input
+                type="text"
+                value={newEstimate}
+                onChange={(e) => setNewEstimate(e.target.value)}
+                placeholder="VD: 2h, 30m, 1d"
+                disabled={updatingEstimate}
+                autoFocus
+              />
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setEstimateModalOpen(null)} disabled={updatingEstimate}>Hủy</button>
+              <button
+                className="btn btn-primary"
+                disabled={!newEstimate.trim() || updatingEstimate}
+                onClick={handleEstimateSubmit}
+              >
+                {updatingEstimate ? "Đang lưu..." : "Lưu Estimate"}
               </button>
             </div>
           </div>

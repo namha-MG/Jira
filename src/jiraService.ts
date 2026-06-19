@@ -718,3 +718,19 @@ export async function addComment(issueKey: string, body: string): Promise<any> {
   const res = await jiraApi.post(`/issue/${issueKey}/comment`, { body });
   return res.data;
 }
+
+/** Update original estimate of an issue */
+export async function updateIssueEstimate(issueKey: string, originalEstimate: string): Promise<any> {
+  const res = await jiraApi.put(`/issue/${issueKey}`, {
+    update: {
+      timetracking: [
+        {
+          edit: {
+            originalEstimate: originalEstimate
+          }
+        }
+      ]
+    }
+  });
+  return res.data;
+}
