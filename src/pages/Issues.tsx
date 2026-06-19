@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput
+  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
@@ -57,6 +57,12 @@ export default function Issues() {
 
   const [projectUsers, setProjectUsers] = useState<JiraUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+
+  // Comment states
+  const [commentIssueKey, setCommentIssueKey] = useState<string | null>(null);
+  const [commentText, setCommentText] = useState("");
+  const [commentFile, setCommentFile] = useState<File | null>(null);
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
 
@@ -229,6 +235,43 @@ export default function Issues() {
       }
     } else {
       alert("Tính năng này chỉ hỗ trợ chuyển từ Open -> In Progress -> Fixed -> Commit -> Closed");
+    }
+  };
+
+  const handleCommentSubmit = async () => {
+    if (!commentIssueKey) return;
+    if (!commentText.trim() && !commentFile) {
+      alert("Vui lòng nhập nội dung comment hoặc chọn ảnh.");
+      return;
+    }
+    
+    setIsSubmittingComment(true);
+    try {
+      let finalCommentText = commentText;
+      
+      if (commentFile) {
+        const uploadRes = await uploadAttachment(commentIssueKey, commentFile);
+        const filename = uploadRes && uploadRes.length > 0 && uploadRes[0].filename 
+                         ? uploadRes[0].filename 
+                         : commentFile.name;
+        finalCommentText += `\n\n!${filename}!`;
+      }
+      
+      await addComment(commentIssueKey, finalCommentText);
+      alert("Đã thêm comment thành công!");
+      setCommentIssueKey(null);
+      setCommentText("");
+      setCommentFile(null);
+      
+      if (selectedIssue && (selectedIssue.key === commentIssueKey || selectedIssue.fields.subtasks?.some(s => s.key === commentIssueKey))) {
+         const freshIssue = await getIssue(selectedIssue.key);
+         setSelectedIssue(freshIssue);
+      }
+    } catch (e: any) {
+      console.error("Failed to add comment:", e);
+      alert("Lỗi khi thêm comment: " + (e.response?.data?.errorMessages?.[0] || e.message));
+    } finally {
+      setIsSubmittingComment(false);
     }
   };
 
@@ -622,6 +665,14 @@ export default function Issues() {
                       <td style={{ fontSize: 11, color: "var(--text-muted)" }}>{updatedDate}</td>
                       <td>
                         <button
+                          className="btn btn-ghost btn-sm"
+                          style={{ padding: "4px 8px", fontSize: 14 }}
+                          onClick={() => setCommentIssueKey(issue.key)}
+                          title="Thêm Comment"
+                        >
+                          💬
+                        </button>
+                        <button
                           id={`btn-detail-${issue.key}`}
                           className="btn btn-ghost btn-sm"
                           onClick={() => openDetail(issue)}
@@ -748,6 +799,18 @@ export default function Issues() {
                       <span style={{ fontSize: 13, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
                         {st.fields.summary}
                       </span>
+
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        style={{ padding: "2px 8px", fontSize: 11 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCommentIssueKey(st.key);
+                        }}
+                        title="Thêm Comment"
+                      >
+                        💬
+                      </button>
 
                       <button
                         className="btn btn-ghost btn-sm"
@@ -1257,6 +1320,53 @@ export default function Issues() {
           </div>
         </div>
       )}
+
+      {/* Comment Modal */}
+      {commentIssueKey && (
+        <div className="modal-overlay" onClick={() => { if (!isSubmittingComment) { setCommentIssueKey(null); setCommentText(""); setCommentFile(null); } }}>
+          <div className="modal" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Thêm Comment - {commentIssueKey}</div>
+              <button className="modal-close" onClick={() => { if (!isSubmittingComment) { setCommentIssueKey(null); setCommentText(""); setCommentFile(null); } }}>✕</button>
+            </div>
+            
+            <div className="form-group">
+              <label>Nội dung Comment</label>
+              <textarea 
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                rows={4}
+                placeholder="Nhập nội dung..."
+                style={{ width: "100%", fontFamily: "inherit" }}
+              />
+            </div>
+            
+            <div className="form-group">
+              <label>Đính kèm ảnh (Tùy chọn)</label>
+              <input 
+                type="file" 
+                accept="image/*"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files.length > 0) {
+                    setCommentFile(e.target.files[0]);
+                  } else {
+                    setCommentFile(null);
+                  }
+                }}
+              />
+              {commentFile && <div style={{ fontSize: 12, marginTop: 4, color: "var(--accent-green)" }}>Đã chọn: {commentFile.name}</div>}
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => { setCommentIssueKey(null); setCommentText(""); setCommentFile(null); }} disabled={isSubmittingComment}>Hủy</button>
+              <button onClick={handleCommentSubmit} className="btn btn-primary" disabled={isSubmittingComment}>
+                {isSubmittingComment ? "Đang gửi..." : "Gửi Comment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
