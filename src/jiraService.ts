@@ -94,6 +94,7 @@ export type JiraIssue = {
       comments: JiraComment[];
       total: number;
     };
+    attachment?: any[];
   };
   changelog?: {
     histories: JiraChangelogHistory[];
