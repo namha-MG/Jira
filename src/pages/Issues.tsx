@@ -5,6 +5,11 @@ import {
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
 
+function normalizeText(str?: string) {
+  if (!str) return "";
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "d").toLowerCase();
+}
+
 function getBadgeClass(status: string): string {
   if (status === "In Progress") return "badge badge-inprogress";
   if (status === "Done") return "badge badge-done";
@@ -306,7 +311,12 @@ export default function Issues() {
   // Filter + sort
   const filtered = issues
     .filter((i) => {
-      const matchText = !searchText || i.key.toLowerCase().includes(searchText.toLowerCase()) || i.fields.summary.toLowerCase().includes(searchText.toLowerCase());
+      const search = normalizeText(searchText);
+      const matchText = !searchText || 
+        normalizeText(i.key).includes(search) || 
+        normalizeText(i.fields.summary).includes(search) ||
+        (i.fields.assignee && normalizeText(i.fields.assignee.displayName).includes(search));
+        
       const matchStatus = statusFilter === "all" || i.fields.status.name === statusFilter;
       
       let matchTime = true;
