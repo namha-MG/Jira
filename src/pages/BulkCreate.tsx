@@ -877,27 +877,23 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                 <div className="settings-section-title">➕ Tạo hàng loạt Issue</div>
                 <div className="settings-section-desc">Mỗi dòng văn bản bên dưới sẽ được tạo thành một Issue riêng biệt.</div>
 
-                <div style={{ display: "flex", gap: 16, marginTop: 16, marginBottom: 8 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
-                    <input
-                      type="radio"
-                      checked={manualMode === "independent"}
-                      onChange={() => setManualMode("independent")}
-                      disabled={isRunning}
-                      style={{ margin: 0 }}
-                    />
+                <div style={{ display: "flex", gap: 8, marginTop: 16, marginBottom: 16 }}>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${manualMode === "independent" ? "btn-primary" : "btn-secondary"}`}
+                    onClick={() => setManualMode("independent")}
+                    disabled={isRunning}
+                  >
                     Tạo Task / Story độc lập
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
-                    <input
-                      type="radio"
-                      checked={manualMode === "subtask"}
-                      onChange={() => setManualMode("subtask")}
-                      disabled={isRunning}
-                      style={{ margin: 0 }}
-                    />
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${manualMode === "subtask" ? "btn-primary" : "btn-secondary"}`}
+                    onClick={() => setManualMode("subtask")}
+                    disabled={isRunning}
+                  >
                     Tạo Sub-task cho Issue có sẵn
-                  </label>
+                  </button>
                 </div>
 
                 <form onSubmit={handleBulkCreateManual}>
