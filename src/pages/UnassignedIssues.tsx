@@ -96,13 +96,34 @@ export default function UnassignedIssues() {
           <h1 className="page-title">Task Chưa Gán (Unassigned)</h1>
           <p className="page-subtitle">Danh sách các Issue/Sub-task chưa được phân công cho bất kỳ ai.</p>
         </div>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <div className="form-group" style={{ margin: 0, display: "flex", gap: 8, alignItems: "center" }}>
-            <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>Từ:</span>
-            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ padding: "6px 10px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 6 }} disabled={loading} />
-            <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>Đến:</span>
-            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ padding: "6px 10px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 6 }} disabled={loading} />
+        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+          {/* Date Range Picker (Pill style) */}
+          <div style={{ display: "flex", alignItems: "center", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: "2px 4px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
+            <div style={{ padding: "0 8px" }}>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>Từ</span>
+            </div>
+            <input 
+              type="date" 
+              value={dateFrom} 
+              onChange={e => setDateFrom(e.target.value)} 
+              style={{ border: "none", background: "transparent", outline: "none", padding: "6px 4px", color: "var(--text-primary)", fontSize: 13 }} 
+              disabled={loading} 
+            />
+            
+            <div style={{ width: 1, height: 20, background: "var(--border)", margin: "0 8px" }} />
+            
+            <div style={{ padding: "0 8px" }}>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>Đến</span>
+            </div>
+            <input 
+              type="date" 
+              value={dateTo} 
+              onChange={e => setDateTo(e.target.value)} 
+              style={{ border: "none", background: "transparent", outline: "none", padding: "6px 4px", color: "var(--text-primary)", fontSize: 13 }} 
+              disabled={loading} 
+            />
           </div>
+
           <div className="form-group" style={{ margin: 0 }}>
             <select
               value={selectedProject}
