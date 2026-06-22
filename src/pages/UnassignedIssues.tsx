@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { getAllIssuesByJql, JiraIssue, getAssignableUsers, updateIssue } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
+import UserSelect from "../components/UserSelect";
 
 function getBadgeClass(statusName: string = "") {
   const s = statusName.toLowerCase();
@@ -258,18 +259,14 @@ export default function UnassignedIssues() {
             </div>
             <div className="form-group">
               <label>Chọn người thực hiện</label>
-              <select
+              <UserSelect
+                users={assignableUsers}
                 value={assigneeValue}
-                onChange={e => setAssigneeValue(e.target.value)}
-                disabled={loadingUsers || assigning}
-              >
-                <option value="">{loadingUsers ? "Đang tải danh sách..." : "-- Chọn người thực hiện --"}</option>
-                {assignableUsers.map(u => (
-                  <option key={u.accountId || u.name} value={u.name || u.accountId}>
-                    {u.displayName} {u.name ? `(${u.name})` : ""}
-                  </option>
-                ))}
-              </select>
+                onChange={setAssigneeValue}
+                loading={loadingUsers}
+                disabled={assigning}
+                placeholder="-- Chọn người thực hiện --"
+              />
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setAssignModalOpen(null)} disabled={assigning}>Hủy</button>

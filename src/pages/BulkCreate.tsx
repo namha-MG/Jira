@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { createIssue, createSubTask, addWorklog, JiraIssue, JiraUser, getLatestTaskDate, getAssignableUsers, getAllIssuesByJql } from "../jiraService";
+import UserSelect from "../components/UserSelect";
 import { JIRA_PROJECTS } from "../config";
 
 interface CreationLog {
@@ -627,18 +628,14 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
 
                 <div className="form-group">
                   <label>Tài khoản Assignee Mặc định</label>
-                  <select
+                  <UserSelect
+                    users={assignableUsers}
                     value={assignee}
-                    onChange={(e) => setAssignee(e.target.value)}
-                    disabled={isAnalyzing || loadingUsers}
-                  >
-                    <option value="">{loadingUsers ? "Đang tải danh sách..." : "-- Tự động assign cho bạn --"}</option>
-                    {assignableUsers.map(u => (
-                      <option key={u.accountId || u.name} value={u.name || u.accountId}>
-                        {u.displayName} {u.name ? `(${u.name})` : ""}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setAssignee}
+                    loading={loadingUsers}
+                    disabled={isAnalyzing}
+                    placeholder="-- Tự động assign cho bạn --"
+                  />
                 </div>
 
                 <div className="form-group">
@@ -705,23 +702,20 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                             style={{ flex: 1 }}
                             disabled={isRunning}
                           />
-                          <select
-                            value={task.assignee}
-                            onChange={(e) => {
-                              const newTasks = [...analyzedTasks];
-                              newTasks[idx].assignee = e.target.value;
-                              setAnalyzedTasks(newTasks);
-                            }}
-                            style={{ width: "160px" }}
-                            disabled={isRunning || loadingUsers}
-                          >
-                            <option value="">-- Assign cho bạn --</option>
-                            {assignableUsers.map(u => (
-                              <option key={u.accountId || u.name} value={u.name || u.accountId}>
-                                {u.displayName}
-                              </option>
-                            ))}
-                          </select>
+                          <div style={{ width: "200px" }}>
+                            <UserSelect
+                              users={assignableUsers}
+                              value={task.assignee}
+                              onChange={(val) => {
+                                const newTasks = [...analyzedTasks];
+                                newTasks[idx].assignee = val;
+                                setAnalyzedTasks(newTasks);
+                              }}
+                              loading={loadingUsers}
+                              disabled={isRunning}
+                              placeholder="-- Assign cho bạn --"
+                            />
+                          </div>
                           <button
                             type="button"
                             className="btn btn-secondary"
@@ -955,18 +949,14 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
 
                   <div className="form-group">
                     <label>Tài khoản Assignee</label>
-                    <select
+                    <UserSelect
+                      users={assignableUsers}
                       value={assignee}
-                      onChange={(e) => setAssignee(e.target.value)}
-                      disabled={isRunning || loadingUsers}
-                    >
-                      <option value="">{loadingUsers ? "Đang tải danh sách..." : "-- Tự động assign cho bạn --"}</option>
-                      {assignableUsers.map(u => (
-                        <option key={u.accountId || u.name} value={u.name || u.accountId}>
-                          {u.displayName} {u.name ? `(${u.name})` : ""}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setAssignee}
+                      loading={loadingUsers}
+                      disabled={isRunning}
+                      placeholder="-- Tự động assign cho bạn --"
+                    />
                   </div>
 
                   <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
