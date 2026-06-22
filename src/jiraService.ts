@@ -330,6 +330,27 @@ export async function addWorklog(
   return res.data;
 }
 
+/** Xóa worklog của issue */
+export async function deleteWorklog(
+  issueKey: string,
+  worklogId: string,
+  adjustEstimate: string = "auto"
+): Promise<void> {
+  await jiraApi.delete(`/issue/${issueKey}/worklog/${worklogId}`, {
+    params: { adjustEstimate },
+  });
+}
+
+/** Gán issue cho một user */
+export async function assignIssue(
+  issueKey: string,
+  assigneeName: string
+): Promise<void> {
+  await jiraApi.put(`/issue/${issueKey}/assignee`, {
+    name: assigneeName,
+  });
+}
+
 /** Cập nhật estimate của issue */
 export async function updateEstimate(
   issueKey: string,

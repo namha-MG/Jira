@@ -14,7 +14,11 @@ import {
   createSprint,
   startSprint,
   moveIssuesToSprint,
-  getIssuesInSprint
+  getIssuesInSprint,
+  deleteWorklog,
+  assignIssue,
+  getWorklogs,
+  getCurrentUser
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
@@ -130,6 +134,15 @@ export default function Teams() {
   const [assignSprintLoading, setAssignSprintLoading] = useState(false);
   const [availableSprints, setAvailableSprints] = useState<JiraSprint[]>([]);
   const [selectedSprintId, setSelectedSprintId] = useState<number | "">("");
+
+  // Modals for Delete Worklog & Assignee
+  const [deleteWorklogModalOpen, setDeleteWorklogModalOpen] = useState(false);
+  const [deleteWorklogLoading, setDeleteWorklogLoading] = useState(false);
+  const [deleteWorklogLogs, setDeleteWorklogLogs] = useState<{issueKey: string; status: "pending"|"success"|"error"; error?: string}[]>([]);
+
+  const [changeAssigneeModalOpen, setChangeAssigneeModalOpen] = useState(false);
+  const [changeAssigneeLoading, setChangeAssigneeLoading] = useState(false);
+  const [newAssigneeName, setNewAssigneeName] = useState("");
 
   // ── Tab 6: Sprints ────────────────────────────────────────────────────────
   const [sprintProjectKey, setSprintProjectKey] = useState(JIRA_PROJECTS[0].key);
@@ -1375,39 +1388,58 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                 )}
                 
                 {teamTasks.length > 0 && selectedTasks.length > 0 && (
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    style={{ marginLeft: "auto", border: "1px solid var(--accent-blue)", color: "var(--accent-blue)" }}
-                    onClick={async () => {
-                      // Load boards for the first selected project
-                      setAssignSprintLoading(true);
-                      setAssignSprintModalOpen(true);
-                      try {
-                        const boards = await getBoards(taskProjects[0] || JIRA_PROJECTS[0].key);
-                        let allSprints: JiraSprint[] = [];
-                        for (const b of boards) {
-                          try {
-                            const sps = await getSprints(b.id, "active,future");
-                            // Thêm tên board vào tên sprint để dễ phân biệt nếu cần
-                            const mappedSps = sps.map(s => ({ ...s, name: `${s.name} (${b.name})` }));
-                            allSprints = [...allSprints, ...mappedSps];
-                          } catch (err) {
-                            // ignore errors for individual boards (some might not support sprints)
+                  <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      style={{ border: "1px solid var(--accent-red)", color: "var(--accent-red)" }}
+                      onClick={() => setDeleteWorklogModalOpen(true)}
+                    >
+                      🗑️ Xóa Log Work ({selectedTasks.length})
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      style={{ border: "1px solid var(--accent-orange)", color: "var(--accent-orange)" }}
+                      onClick={() => {
+                        setNewAssigneeName("");
+                        setChangeAssigneeModalOpen(true);
+                      }}
+                    >
+                      👤 Đổi Assignee ({selectedTasks.length})
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      style={{ border: "1px solid var(--accent-blue)", color: "var(--accent-blue)" }}
+                      onClick={async () => {
+                        // Load boards for the first selected project
+                        setAssignSprintLoading(true);
+                        setAssignSprintModalOpen(true);
+                        try {
+                          const boards = await getBoards(taskProjects[0] || JIRA_PROJECTS[0].key);
+                          let allSprints: JiraSprint[] = [];
+                          for (const b of boards) {
+                            try {
+                              const sps = await getSprints(b.id, "active,future");
+                              // Thêm tên board vào tên sprint để dễ phân biệt nếu cần
+                              const mappedSps = sps.map(s => ({ ...s, name: `${s.name} (${b.name})` }));
+                              allSprints = [...allSprints, ...mappedSps];
+                            } catch (err) {
+                              // ignore errors for individual boards (some might not support sprints)
+                            }
                           }
+                          // Lọc trùng lặp sprintId
+                          const uniqueSprints = Array.from(new Map(allSprints.map(s => [s.id, s])).values());
+                          setAvailableSprints(uniqueSprints);
+                        } catch (err) {
+                          console.error(err);
+                          alert("Lỗi tải danh sách Sprint");
+                        } finally {
+                          setAssignSprintLoading(false);
                         }
-                        // Lọc trùng lặp sprintId
-                        const uniqueSprints = Array.from(new Map(allSprints.map(s => [s.id, s])).values());
-                        setAvailableSprints(uniqueSprints);
-                      } catch (err) {
-                        console.error(err);
-                        alert("Lỗi tải danh sách Sprint");
-                      } finally {
-                        setAssignSprintLoading(false);
-                      }
-                    }}
-                  >
-                    🚀 Gắn {selectedTasks.length} task vào Sprint
-                  </button>
+                      }}
+                    >
+                      🚀 Gắn {selectedTasks.length} task vào Sprint
+                    </button>
+                  </div>
                 )}
 
                 <button
@@ -1925,6 +1957,160 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                 disabled={!selectedSprintId || assignSprintLoading}
               >
                 {assignSprintLoading ? "Đang xử lý..." : "Xác nhận"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Worklog Modal */}
+      {deleteWorklogModalOpen && (
+        <div className="modal-overlay" onClick={() => !deleteWorklogLoading && setDeleteWorklogModalOpen(false)}>
+          <div className="modal" style={{ maxWidth: 500 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Xóa Log Work Hàng Loạt</div>
+              <button className="modal-close" onClick={() => !deleteWorklogLoading && setDeleteWorklogModalOpen(false)}>✕</button>
+            </div>
+            
+            <div style={{ marginBottom: 16 }}>
+              Bạn đang chọn <strong>{selectedTasks.length}</strong> task. 
+              Hệ thống sẽ tìm các worklog do bạn tạo trên những task này và tiến hành xóa.
+            </div>
+
+            {deleteWorklogLogs.length > 0 && (
+              <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: 12, maxHeight: 200, overflowY: "auto", marginBottom: 16 }}>
+                {deleteWorklogLogs.map((log, idx) => (
+                  <div key={idx} style={{ display: "flex", gap: 8, marginBottom: 4, fontSize: 13 }}>
+                    <span style={{ width: 100, fontWeight: 500 }}>{log.issueKey}</span>
+                    {log.status === "pending" && <span style={{ color: "var(--text-muted)" }}>⏳ Đang chờ...</span>}
+                    {log.status === "success" && <span style={{ color: "var(--accent-green)" }}>✅ Thành công {log.error ? `(${log.error})` : ""}</span>}
+                    {log.status === "error" && <span style={{ color: "var(--accent-red)" }}>❌ {log.error}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setDeleteWorklogModalOpen(false)} disabled={deleteWorklogLoading}>Đóng</button>
+              <button 
+                className="btn btn-primary" 
+                style={{ background: "var(--accent-red)" }}
+                onClick={async () => {
+                  setDeleteWorklogLoading(true);
+                  const logs = selectedTasks.map(key => ({ issueKey: key, status: "pending" as const }));
+                  setDeleteWorklogLogs(logs);
+
+                  try {
+                    const currentUser = await getCurrentUser();
+                    const currentUsername = currentUser.name || currentUser.accountId || currentUser.emailAddress;
+
+                    for (let i = 0; i < selectedTasks.length; i++) {
+                      const issueKey = selectedTasks[i];
+                      try {
+                        const worklogs = await getWorklogs(issueKey);
+                        // Filter worklogs by current user
+                        const myWorklogs = worklogs.filter(wl => {
+                           const author = wl.author;
+                           return author.name === currentUsername || author.accountId === currentUsername || author.emailAddress === currentUsername;
+                        });
+
+                        if (myWorklogs.length === 0) {
+                           setDeleteWorklogLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: "success", error: "Không có" } : l));
+                           continue;
+                        }
+
+                        // Delete each worklog
+                        for (const wl of myWorklogs) {
+                          await deleteWorklog(issueKey, wl.id, "auto");
+                        }
+                        
+                        setDeleteWorklogLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: "success" } : l));
+                      } catch (err: any) {
+                        const msg = err.response?.data?.errorMessages?.[0] || err.message || "Lỗi xóa worklog";
+                        setDeleteWorklogLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: "error", error: msg } : l));
+                      }
+                    }
+                    
+                    // Refresh
+                    handleFetchTeamTasks();
+                  } catch (err: any) {
+                    alert("Không thể lấy thông tin user hiện tại.");
+                  } finally {
+                    setDeleteWorklogLoading(false);
+                  }
+                }}
+                disabled={deleteWorklogLoading || (deleteWorklogLogs.length > 0 && deleteWorklogLogs.every(l => l.status !== "pending"))}
+              >
+                {deleteWorklogLoading ? "Đang xử lý..." : "Bắt đầu xóa"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Change Assignee Modal */}
+      {changeAssigneeModalOpen && (
+        <div className="modal-overlay" onClick={() => !changeAssigneeLoading && setChangeAssigneeModalOpen(false)}>
+          <div className="modal" style={{ maxWidth: 450 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Đổi Assignee Hàng Loạt</div>
+              <button className="modal-close" onClick={() => !changeAssigneeLoading && setChangeAssigneeModalOpen(false)}>✕</button>
+            </div>
+            
+            <div style={{ marginBottom: 16 }}>
+              Bạn đang chọn <strong>{selectedTasks.length}</strong> task. 
+            </div>
+
+            <div className="form-group">
+              <label>Tài khoản Jira mới <span style={{color:"red"}}>*</span></label>
+              <input
+                type="text"
+                list="assignable-users-list-modal"
+                placeholder="Nhập hoặc chọn username Jira..."
+                value={newAssigneeName}
+                onChange={e => setNewAssigneeName(e.target.value)}
+                disabled={changeAssigneeLoading}
+                autoComplete="off"
+              />
+              {assignableUsers.length > 0 && (
+                <datalist id="assignable-users-list-modal">
+                  {assignableUsers.map(u => (
+                    <option key={u.accountId || u.name} value={u.name || u.accountId}>
+                      {u.displayName}
+                    </option>
+                  ))}
+                </datalist>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setChangeAssigneeModalOpen(false)} disabled={changeAssigneeLoading}>Hủy</button>
+              <button 
+                className="btn btn-primary" 
+                onClick={async () => {
+                  if (!newAssigneeName.trim()) {
+                    alert("Vui lòng nhập tên tài khoản mới");
+                    return;
+                  }
+                  setChangeAssigneeLoading(true);
+                  try {
+                    for (const issueKey of selectedTasks) {
+                      try {
+                        await assignIssue(issueKey, newAssigneeName.trim());
+                      } catch (err) {
+                         console.warn(`Failed to assign ${issueKey}`, err);
+                      }
+                    }
+                    setChangeAssigneeModalOpen(false);
+                    // Refresh
+                    handleFetchTeamTasks();
+                  } finally {
+                    setChangeAssigneeLoading(false);
+                  }
+                }}
+                disabled={changeAssigneeLoading || !newAssigneeName.trim()}
+              >
+                {changeAssigneeLoading ? "Đang xử lý..." : "Cập nhật"}
               </button>
             </div>
           </div>
