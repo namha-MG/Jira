@@ -2106,8 +2106,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
               <button
                 className="btn btn-primary"
                 onClick={async () => {
-                  if (!newAssigneeName.trim()) {
-                    alert("Vui lòng nhập tên tài khoản mới");
+                  if (newAssigneeName.trim() === "" && !confirm("Bạn có chắc chắn muốn Xóa người được giao (Unassign) của các task này không?")) {
                     return;
                   }
                   setChangeAssigneeLoading(true);
@@ -2132,7 +2131,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                     setChangeAssigneeLoading(false);
                   }
                 }}
-                disabled={changeAssigneeLoading || !newAssigneeName.trim() || (changeAssigneeLogs.length > 0 && changeAssigneeLogs.every(l => l.status !== "pending"))}
+                disabled={changeAssigneeLoading || (changeAssigneeLogs.length > 0 && changeAssigneeLogs.every(l => l.status !== "pending"))}
               >
                 {changeAssigneeLoading ? "Đang xử lý..." : "Cập nhật"}
               </button>

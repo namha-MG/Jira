@@ -346,15 +346,18 @@ export async function assignIssue(
   issueKey: string,
   assigneeName: string
 ): Promise<void> {
+  const isUnassigned = !assigneeName || assigneeName.trim() === "";
+  const nameToAssign = isUnassigned ? "-1" : assigneeName.trim();
+
   try {
     await jiraApi.put(`/issue/${issueKey}/assignee`, {
-      name: assigneeName,
+      name: nameToAssign,
     });
   } catch (err: any) {
     console.warn("assignee API failed, trying fallback update issue:", err);
     await jiraApi.put(`/issue/${issueKey}`, {
       fields: {
-        assignee: { name: assigneeName }
+        assignee: isUnassigned ? null : { name: nameToAssign }
       }
     });
   }
