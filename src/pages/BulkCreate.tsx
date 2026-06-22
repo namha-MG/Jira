@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
-import { createIssue, createSubTask, addWorklog, JiraIssue, JiraUser, getLatestTaskDate, getAssignableUsers } from "../jiraService";
+import { createIssue, createSubTask, addWorklog, JiraIssue, JiraUser, getLatestTaskDate, getAssignableUsers, getAllIssuesByJql } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 
 interface CreationLog {
@@ -58,6 +58,11 @@ export default function BulkCreate() {
   const [assignableUsers, setAssignableUsers] = useState<JiraUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   
+  const [manualMode, setManualMode] = useState<"independent" | "subtask">("independent");
+  const [parentTaskKey, setParentTaskKey] = useState("");
+  const [recentTasks, setRecentTasks] = useState<JiraIssue[]>([]);
+  const [loadingTasks, setLoadingTasks] = useState(false);
+
   const [excelData, setExcelData] = useState<any[]>([]);
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
@@ -71,6 +76,16 @@ export default function BulkCreate() {
         .finally(() => setLoadingUsers(false));
     }
   }, [isConfigured, selectedProject]);
+
+  useEffect(() => {
+    if (isConfigured && selectedProject && creationMode === "manual" && manualMode === "subtask") {
+      setLoadingTasks(true);
+      getAllIssuesByJql(`project = ${selectedProject} AND issuetype in (Task, Story, Bug) ORDER BY updated DESC`, 0, 100)
+        .then(res => setRecentTasks(res.issues))
+        .catch(e => console.error("Failed to load recent tasks", e))
+        .finally(() => setLoadingTasks(false));
+    }
+  }, [isConfigured, selectedProject, creationMode, manualMode]);
 
   const getNextWorkday = (date: Date): Date => {
     const d = new Date(date);
@@ -403,16 +418,33 @@ export default function BulkCreate() {
         const startDateStr = formatJiraIsoDate(currentLogDate, 8, 0);
         const endDateStr = formatJiraIsoDate(currentLogDate, 17, 0);
 
-        const created: JiraIssue = await createIssue({
-          projectKey: selectedProject,
-          summary: summaries[i].summary,
-          assigneeName: summaries[i].assignee ? summaries[i].assignee : undefined,
-          originalEstimate: estimate,
-          customFields: {
-            "customfield_10300": startDateStr,
-            "customfield_10302": endDateStr,
-          }
-        });
+        let createdKey = "";
+        if (manualMode === "subtask") {
+          const sCreated = await createSubTask({
+            parentKey: parentTaskKey,
+            projectKey: selectedProject,
+            summary: summaries[i].summary,
+            assigneeName: summaries[i].assignee ? summaries[i].assignee : undefined,
+            originalEstimate: estimate,
+            customFields: {
+              "customfield_10300": startDateStr,
+              "customfield_10302": endDateStr,
+            }
+          });
+          createdKey = sCreated.key;
+        } else {
+          const created: JiraIssue = await createIssue({
+            projectKey: selectedProject,
+            summary: summaries[i].summary,
+            assigneeName: summaries[i].assignee ? summaries[i].assignee : undefined,
+            originalEstimate: estimate,
+            customFields: {
+              "customfield_10300": startDateStr,
+              "customfield_10302": endDateStr,
+            }
+          });
+          createdKey = created.key;
+        }
 
         if (autoLogWork) {
           const startedStr = currentLogDate.toISOString().replace("Z", "+0000");
@@ -438,7 +470,7 @@ export default function BulkCreate() {
             }
           }
 
-          await addWorklog(created.key, {
+          await addWorklog(createdKey, {
             timeSpentSeconds: 7 * 3600,
             comment: logComment,
             started: startedStr,
@@ -448,7 +480,7 @@ export default function BulkCreate() {
 
         setLogs((prev) =>
           prev.map((log, idx) =>
-            idx === i ? { ...log, status: "success", key: created.key } : log
+            idx === i ? { ...log, status: "success", key: createdKey } : log
           )
         );
       } catch (err: unknown) {
@@ -845,6 +877,29 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                 <div className="settings-section-title">➕ Tạo hàng loạt Issue</div>
                 <div className="settings-section-desc">Mỗi dòng văn bản bên dưới sẽ được tạo thành một Issue riêng biệt.</div>
 
+                <div style={{ display: "flex", gap: 16, marginTop: 16, marginBottom: 8 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+                    <input
+                      type="radio"
+                      checked={manualMode === "independent"}
+                      onChange={() => setManualMode("independent")}
+                      disabled={isRunning}
+                      style={{ margin: 0 }}
+                    />
+                    Tạo Task / Story độc lập
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+                    <input
+                      type="radio"
+                      checked={manualMode === "subtask"}
+                      onChange={() => setManualMode("subtask")}
+                      disabled={isRunning}
+                      style={{ margin: 0 }}
+                    />
+                    Tạo Sub-task cho Issue có sẵn
+                  </label>
+                </div>
+
                 <form onSubmit={handleBulkCreateManual}>
                   <div className="form-group">
                     <label>Dự án (Project)</label>
@@ -860,6 +915,34 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                       ))}
                     </select>
                   </div>
+
+                  {manualMode === "subtask" && (
+                    <div className="form-group">
+                      <label>Task/Story cha (Key) *</label>
+                      <input
+                        type="text"
+                        list="parent-task-list"
+                        placeholder="VD: JIRA-123 hoặc chọn từ danh sách"
+                        value={parentTaskKey}
+                        onChange={e => setParentTaskKey(e.target.value)}
+                        disabled={isRunning || loadingTasks}
+                        required
+                        autoComplete="off"
+                      />
+                      {recentTasks.length > 0 && (
+                        <datalist id="parent-task-list">
+                          {recentTasks.map(t => (
+                            <option key={t.key} value={t.key}>
+                              {t.fields.summary}
+                            </option>
+                          ))}
+                        </datalist>
+                      )}
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                        {loadingTasks ? "Đang tải danh sách gợi ý..." : "Gợi ý từ 100 task mới cập nhật."}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="form-group">
                     <label>Danh sách tóm tắt Issue (Mỗi dòng là 1 Issue) *</label>
