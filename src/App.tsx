@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useIsAuthenticated, useMsal } from "@azure/msal-react";
-import type { Page } from "./types";
+import { HashRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
@@ -15,7 +15,6 @@ import UnassignedIssues from "./pages/UnassignedIssues";
 export default function App() {
   const isAuthenticated = useIsAuthenticated();
   const { instance } = useMsal();
-  const [currentPage, setCurrentPage] = useState<Page>("dashboard");
   const [bypassAuth, setBypassAuth] = useState(() => localStorage.getItem("auth_bypass") === "true");
 
   const handleLogout = useCallback(() => {
@@ -39,27 +38,22 @@ export default function App() {
     );
   }
 
-  const renderPage = () => {
-    switch (currentPage) {
-      case "dashboard":   return <Dashboard />;
-      case "issues":      return <Issues />;
-      case "logwork":     return <LogWork />;
-      case "bulkcreate":  return <BulkCreate />;
-      case "teams":       return <Teams />;
-      case "joblogs":     return <JobLogs />;
-      case "unassigned":  return <UnassignedIssues />;
-      case "settings":    return <Settings />;
-      default:            return <Dashboard />;
-    }
-  };
-
   return (
-    <Layout
-      currentPage={currentPage}
-      onNavigate={setCurrentPage}
-      onLogout={handleLogout}
-    >
-      {renderPage()}
-    </Layout>
+    <Router>
+      <Layout onLogout={handleLogout}>
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/issues" element={<Issues />} />
+          <Route path="/logwork" element={<LogWork />} />
+          <Route path="/bulkcreate" element={<BulkCreate />} />
+          <Route path="/teams" element={<Teams />} />
+          <Route path="/joblogs" element={<JobLogs />} />
+          <Route path="/unassigned" element={<UnassignedIssues />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </Layout>
+    </Router>
   );
 }

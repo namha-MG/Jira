@@ -1,26 +1,25 @@
 import { ReactNode } from "react";
 import { useMsal } from "@azure/msal-react";
+import { NavLink } from "react-router-dom";
 import type { Page } from "../types";
 
 interface LayoutProps {
   children: ReactNode;
-  currentPage: Page;
-  onNavigate: (page: Page) => void;
   onLogout: () => void;
 }
 
-const navItems: { id: Page; icon: string; label: string }[] = [
-  { id: "dashboard",  icon: "📊", label: "Dashboard" },
-  { id: "issues",     icon: "📋", label: "Danh sách Issues" },
-  { id: "logwork",    icon: "⏱️", label: "Log Công Việc" },
-  { id: "bulkcreate", icon: "➕", label: "Tạo Issue Nhanh" },
-  { id: "unassigned", icon: "👤", label: "Task Chưa Gán" },
-  { id: "teams",      icon: "🏢", label: "Quản lý Team" },
-  { id: "joblogs",    icon: "🤖", label: "Lịch sử Job Tự động" },
-  { id: "settings",   icon: "⚙️", label: "Cài đặt" },
+const navItems: { id: Page; icon: string; label: string; path: string }[] = [
+  { id: "dashboard",  icon: "📊", label: "Dashboard", path: "/dashboard" },
+  { id: "issues",     icon: "📋", label: "Danh sách Issues", path: "/issues" },
+  { id: "logwork",    icon: "⏱️", label: "Log Công Việc", path: "/logwork" },
+  { id: "bulkcreate", icon: "➕", label: "Tạo Issue Nhanh", path: "/bulkcreate" },
+  { id: "unassigned", icon: "👤", label: "Task Chưa Gán", path: "/unassigned" },
+  { id: "teams",      icon: "🏢", label: "Quản lý Team", path: "/teams" },
+  { id: "joblogs",    icon: "🤖", label: "Lịch sử Job Tự động", path: "/joblogs" },
+  { id: "settings",   icon: "⚙️", label: "Cài đặt", path: "/settings" },
 ];
 
-export default function Layout({ children, currentPage, onNavigate, onLogout }: LayoutProps) {
+export default function Layout({ children, onLogout }: LayoutProps) {
   const { accounts } = useMsal();
   const user = accounts[0];
   const displayName = user?.name || user?.username || localStorage.getItem("jira_user_name") || "Local User";
@@ -50,15 +49,16 @@ export default function Layout({ children, currentPage, onNavigate, onLogout }: 
         <nav className="sidebar-nav">
           <div className="nav-section-title">Menu</div>
           {navItems.map((item) => (
-            <button
+            <NavLink
               key={item.id}
+              to={item.path}
               id={`nav-${item.id}`}
-              className={`nav-item ${currentPage === item.id ? "active" : ""}`}
-              onClick={() => onNavigate(item.id)}
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              style={{ textDecoration: "none" }}
             >
               <span className="nav-item-icon">{item.icon}</span>
               {item.label}
-            </button>
+            </NavLink>
           ))}
         </nav>
 

@@ -78,7 +78,7 @@ export default function UnassignedIssues() {
   };
 
   return (
-    <div className="page-container">
+    <div className="page-container" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <div className="page-header" style={{ marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <h1 className="page-title">Task Chưa Gán (Unassigned)</h1>
@@ -104,10 +104,10 @@ export default function UnassignedIssues() {
         </div>
       </div>
 
-      <div className="card">
-        <div style={{ overflowX: "auto" }}>
-          <table className="table">
-            <thead>
+      <div className="card" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ flex: 1, overflow: "auto", minHeight: 300 }}>
+          <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead style={{ position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 1, boxShadow: "0 1px 0 var(--border)" }}>
               <tr>
                 <th style={{ width: 100 }}>Type</th>
                 <th style={{ width: 120 }}>Key</th>
