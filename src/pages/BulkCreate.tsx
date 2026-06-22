@@ -80,8 +80,8 @@ export default function BulkCreate() {
   useEffect(() => {
     if (isConfigured && selectedProject && creationMode === "manual" && manualMode === "subtask") {
       setLoadingTasks(true);
-      getAllIssuesByJql(`project = ${selectedProject} AND issuetype in (Task, Story, Bug) ORDER BY updated DESC`, 0, 100)
-        .then(res => setRecentTasks(res.issues))
+      getAllIssuesByJql(`project = "${selectedProject}" AND issuetype in (Task, Story, Bug) ORDER BY updated DESC`, 100)
+        .then(res => setRecentTasks(res))
         .catch(e => console.error("Failed to load recent tasks", e))
         .finally(() => setLoadingTasks(false));
     }
