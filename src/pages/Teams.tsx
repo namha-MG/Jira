@@ -138,12 +138,12 @@ export default function Teams() {
   // Modals for Delete Worklog & Assignee
   const [deleteWorklogModalOpen, setDeleteWorklogModalOpen] = useState(false);
   const [deleteWorklogLoading, setDeleteWorklogLoading] = useState(false);
-  const [deleteWorklogLogs, setDeleteWorklogLogs] = useState<{issueKey: string; status: "pending"|"success"|"error"; error?: string}[]>([]);
+  const [deleteWorklogLogs, setDeleteWorklogLogs] = useState<{ issueKey: string; status: "pending" | "success" | "error"; error?: string }[]>([]);
 
   const [changeAssigneeModalOpen, setChangeAssigneeModalOpen] = useState(false);
   const [changeAssigneeLoading, setChangeAssigneeLoading] = useState(false);
   const [newAssigneeName, setNewAssigneeName] = useState("");
-  const [changeAssigneeLogs, setChangeAssigneeLogs] = useState<{issueKey: string; status: "pending"|"success"|"error"; error?: string}[]>([]);
+  const [changeAssigneeLogs, setChangeAssigneeLogs] = useState<{ issueKey: string; status: "pending" | "success" | "error"; error?: string }[]>([]);
 
   // ── Tab 6: Sprints ────────────────────────────────────────────────────────
   const [sprintProjectKey, setSprintProjectKey] = useState(JIRA_PROJECTS[0].key);
@@ -151,7 +151,7 @@ export default function Teams() {
   const [sprintBoardId, setSprintBoardId] = useState<number | "">("");
   const [sprintsList, setSprintsList] = useState<JiraSprint[]>([]);
   const [sprintsLoading, setSprintsLoading] = useState(false);
-  
+
   const [expandedSprintId, setExpandedSprintId] = useState<number | null>(null);
   const [sprintTasks, setSprintTasks] = useState<JiraIssue[]>([]);
   const [sprintTasksLoading, setSprintTasksLoading] = useState(false);
@@ -221,7 +221,7 @@ export default function Teams() {
   const selectedTeam = teams.find(t => t.id === selectedTeamId);
   useEffect(() => {
     if (selectedTeam?.project_key && isConfigured) {
-      getAssignableUsers(selectedTeam.project_key).then(setAssignableUsers).catch(() => {});
+      getAssignableUsers(selectedTeam.project_key).then(setAssignableUsers).catch(() => { });
     }
   }, [selectedTeam?.project_key, isConfigured]);
 
@@ -231,7 +231,7 @@ export default function Teams() {
     fetch(`/api/teams/${subTaskTeamId}/members`)
       .then(r => r.json())
       .then(setSubTaskMembers)
-      .catch(() => {});
+      .catch(() => { });
   }, [subTaskTeamId]);
 
   // Load task-tab team members
@@ -240,7 +240,7 @@ export default function Teams() {
     fetch(`/api/teams/${taskTeamId}/members`)
       .then(r => r.json())
       .then(setTaskMembers)
-      .catch(() => {});
+      .catch(() => { });
   }, [taskTeamId]);
 
   // Load stat-tab team members
@@ -249,7 +249,7 @@ export default function Teams() {
     fetch(`/api/teams/${statTeamId}/members`)
       .then(r => r.json())
       .then(setStatMembers)
-      .catch(() => {});
+      .catch(() => { });
   }, [statTeamId]);
 
   // ─── Tab 1: Team CRUD ──────────────────────────────────────────────────────
@@ -508,7 +508,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
     if (taskSprintFilter === "has_sprint") sprintClause = " AND Sprint is not EMPTY";
     else if (taskSprintFilter === "no_sprint") sprintClause = " AND Sprint is EMPTY";
     const dateClause = useDateFilter
-      ? ` AND updated >= "${taskDateFrom}" AND updated <= "${taskDateTo}"`
+      ? ` AND updated >= "${taskDateFrom}" AND updated <= "${taskDateTo} 23:59"`
       : "";
 
     const jql = `${projectFilter}assignee in (${usernames})${statusClause}${typeClause}${sprintClause}${dateClause} ORDER BY updated DESC`;
@@ -551,7 +551,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
     setStatTasks([]);
     try {
       let issues = await getAllIssuesByJql(jql, 500);
-      
+
       let filteredIssues = issues;
       if (useStatDateFilter && statDateFrom && statDateTo) {
         const rangeStart = new Date(statDateFrom);
@@ -560,26 +560,26 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
         rangeEnd.setHours(23, 59, 59, 999);
 
         filteredIssues = issues.filter(i => {
-           const statusName = i.fields.status?.name?.toLowerCase() || "";
-           if (statusName.includes("cancel") || statusName.includes("hủy") || statusName.includes("không thực hiện") || statusName.includes("reject")) return false;
+          const statusName = i.fields.status?.name?.toLowerCase() || "";
+          if (statusName.includes("cancel") || statusName.includes("hủy") || statusName.includes("không thực hiện") || statusName.includes("reject")) return false;
 
-           const updatedDate = new Date(i.fields.updated);
-           if (updatedDate >= rangeStart && updatedDate <= rangeEnd) return true;
+          const updatedDate = new Date(i.fields.updated);
+          if (updatedDate >= rangeStart && updatedDate <= rangeEnd) return true;
 
-           const hasWorklogThisPeriod = i.fields.worklog?.worklogs?.some(wl => {
-             const d = new Date(wl.started);
-             return d >= rangeStart && d <= rangeEnd;
-           });
-           return !!hasWorklogThisPeriod;
+          const hasWorklogThisPeriod = i.fields.worklog?.worklogs?.some(wl => {
+            const d = new Date(wl.started);
+            return d >= rangeStart && d <= rangeEnd;
+          });
+          return !!hasWorklogThisPeriod;
         });
       } else {
         filteredIssues = issues.filter(i => {
-           const statusName = i.fields.status?.name?.toLowerCase() || "";
-           if (statusName.includes("cancel") || statusName.includes("hủy") || statusName.includes("không thực hiện") || statusName.includes("reject")) return false;
-           return true;
+          const statusName = i.fields.status?.name?.toLowerCase() || "";
+          if (statusName.includes("cancel") || statusName.includes("hủy") || statusName.includes("không thực hiện") || statusName.includes("reject")) return false;
+          return true;
         });
       }
-      
+
       setStatTasks(filteredIssues);
     } catch (err: any) {
       setStatError("Lỗi tải dữ liệu: " + (err.message || "Không xác định"));
@@ -601,7 +601,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       if (!a) return;
       const key = a.name || a.accountId;
       if (!map[key]) map[key] = { displayName: a.displayName, username: key, timeSpent: 0, count: 0 };
-      
+
       let logged = 0;
       if (useStatDateFilter && statDateFrom && statDateTo) {
         const rangeStart = new Date(statDateFrom);
@@ -616,7 +616,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       } else {
         logged = issue.fields.timetracking?.timeSpentSeconds || 0;
       }
-      
+
       map[key].timeSpent += logged;
       map[key].count += 1;
     });
@@ -625,16 +625,16 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
 
   const statTasksByMember = React.useMemo(() => {
     const groups: Record<string, { member: { displayName: string; username: string }, issues: JiraIssue[] }> = {};
-    
+
     // Khởi tạo sẵn tất cả các thành viên được filter, để ai cũng có dashboard dù chưa có task
-    const relevantMembers = statMemberFilter === "all" 
-      ? statMembers 
+    const relevantMembers = statMemberFilter === "all"
+      ? statMembers
       : statMembers.filter(m => m.jira_username === statMemberFilter);
-      
+
     relevantMembers.forEach(m => {
-      groups[m.jira_username] = { 
-        member: { displayName: m.display_name || m.jira_username, username: m.jira_username }, 
-        issues: [] 
+      groups[m.jira_username] = {
+        member: { displayName: m.display_name || m.jira_username, username: m.jira_username },
+        issues: []
       };
     });
 
@@ -643,10 +643,10 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       const jName = a?.name;
       const jAccount = a?.accountId;
       const jEmail = a?.emailAddress;
-      
+
       const authors = issue.fields.worklog?.worklogs?.map(wl => wl.author?.name || wl.author?.accountId || wl.author?.emailAddress) || [];
       const involvedUsernames = new Set<string>();
-      
+
       // Check Assignee
       const assigneeMember = relevantMembers.find(m => {
         const u = m.jira_username;
@@ -654,13 +654,13 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
           (jEmail && u === jEmail.split('@')[0]) ||
           (jName && u.split('@')[0] === jName);
       });
-      
+
       if (assigneeMember) {
         involvedUsernames.add(assigneeMember.jira_username);
       } else {
         involvedUsernames.add(jName || jAccount || jEmail || "unassigned");
       }
-      
+
       // Check Worklog Authors
       authors.forEach(authorId => {
         if (!authorId) return;
@@ -670,17 +670,17 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
         });
         if (authorMember) involvedUsernames.add(authorMember.jira_username);
       });
-      
+
       // Push to all involved members
       involvedUsernames.forEach(username => {
         if (!groups[username]) {
           const memberObj = relevantMembers.find(m => m.jira_username === username);
-          groups[username] = { 
-            member: { 
-              displayName: memberObj?.display_name || username, 
-              username 
-            }, 
-            issues: [] 
+          groups[username] = {
+            member: {
+              displayName: memberObj?.display_name || username,
+              username
+            },
+            issues: []
           };
         }
         groups[username].issues.push(issue);
@@ -705,9 +705,9 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       } else {
         tasks++;
       }
-      
+
       estimateSecs += t.fields.timetracking?.originalEstimateSeconds || 0;
-      
+
       const statusName = t.fields.status?.name?.toLowerCase() || "";
       if (statusName.includes("close") || statusName.includes("đóng") || statusName.includes("done") || statusName.includes("hoàn thành")) {
         let logged = 0;
@@ -734,12 +734,12 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
   // ─── Render helpers ────────────────────────────────────────────────────────
 
   const tabs: { id: Tab; icon: string; label: string }[] = [
-    { id: "teams",    icon: "🏢", label: "Quản lý Teams" },
-    { id: "members",  icon: "👥", label: "Thành viên" },
+    { id: "teams", icon: "🏢", label: "Quản lý Teams" },
+    { id: "members", icon: "👥", label: "Thành viên" },
     { id: "subtasks", icon: "🤖", label: "Tạo Sub-tasks AI" },
-    { id: "tasks",    icon: "📋", label: "Danh sách Task" },
+    { id: "tasks", icon: "📋", label: "Danh sách Task" },
     { id: "statistics", icon: "📈", label: "Thống kê" },
-    { id: "sprints",  icon: "🏃", label: "Quản lý Sprint" },
+    { id: "sprints", icon: "🏃", label: "Quản lý Sprint" },
   ];
 
   if (!isConfigured) {
@@ -1387,13 +1387,16 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                     <input type="date" value={taskDateTo} onChange={e => setTaskDateTo(e.target.value)} style={{ width: 150 }} />
                   </>
                 )}
-                
+
                 {teamTasks.length > 0 && selectedTasks.length > 0 && (
                   <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
                     <button
                       className="btn btn-secondary btn-sm"
                       style={{ border: "1px solid var(--accent-red)", color: "var(--accent-red)" }}
-                      onClick={() => setDeleteWorklogModalOpen(true)}
+                      onClick={() => {
+                        setDeleteWorklogLogs([]);
+                        setDeleteWorklogModalOpen(true);
+                      }}
                     >
                       🗑️ Xóa Log Work ({selectedTasks.length})
                     </button>
@@ -1402,6 +1405,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                       style={{ border: "1px solid var(--accent-orange)", color: "var(--accent-orange)" }}
                       onClick={() => {
                         setNewAssigneeName("");
+                        setChangeAssigneeLogs([]);
                         setChangeAssigneeModalOpen(true);
                       }}
                     >
@@ -1463,7 +1467,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                     Danh sách Issues ({teamTasks.length})
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    Closed/Done: {teamTasks.filter(i => ["closed","done"].includes(i.fields.status.name.toLowerCase())).length} task
+                    Closed/Done: {teamTasks.filter(i => ["closed", "done"].includes(i.fields.status.name.toLowerCase())).length} task
                   </div>
                 </div>
 
@@ -1472,8 +1476,8 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                     <thead>
                       <tr style={{ borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>
                         <th style={{ padding: "8px 12px", width: 40 }}>
-                          <input 
-                            type="checkbox" 
+                          <input
+                            type="checkbox"
                             checked={teamTasks.length > 0 && selectedTasks.length === teamTasks.length}
                             onChange={(e) => {
                               if (e.target.checked) setSelectedTasks(teamTasks.map(t => t.key));
@@ -1491,7 +1495,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                     </thead>
                     <tbody>
                       {teamTasks.map(issue => {
-                        const isClosed = ["closed","done"].includes(issue.fields.status.name.toLowerCase());
+                        const isClosed = ["closed", "done"].includes(issue.fields.status.name.toLowerCase());
                         const isSelected = selectedTasks.includes(issue.key);
                         return (
                           <tr
@@ -1502,8 +1506,8 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                             }}
                           >
                             <td style={{ padding: "8px 12px" }}>
-                              <input 
-                                type="checkbox" 
+                              <input
+                                type="checkbox"
                                 checked={isSelected}
                                 onChange={(e) => {
                                   if (e.target.checked) setSelectedTasks([...selectedTasks, issue.key]);
@@ -1660,9 +1664,9 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                         {group.issues.length} Issues
                       </div>
                     </div>
-                    <TeamDashboardMetrics 
-                      issues={group.issues} 
-                      member={group.member} 
+                    <TeamDashboardMetrics
+                      issues={group.issues}
+                      member={group.member}
                       useDateFilter={useStatDateFilter}
                       dateFrom={statDateFrom}
                       dateTo={statDateTo}
@@ -1712,8 +1716,8 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
               <div className="form-group" style={{ margin: 0 }}>
                 <label>Dự án</label>
-                <select 
-                  value={sprintProjectKey} 
+                <select
+                  value={sprintProjectKey}
                   onChange={async (e) => {
                     const key = e.target.value;
                     setSprintProjectKey(key);
@@ -1742,8 +1746,8 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
 
               <div className="form-group" style={{ margin: 0 }}>
                 <label>Board</label>
-                <select 
-                  value={sprintBoardId} 
+                <select
+                  value={sprintBoardId}
                   onChange={async (e) => {
                     const bid = Number(e.target.value) || "";
                     setSprintBoardId(bid);
@@ -1775,15 +1779,15 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                 onClick={async () => {
                   if (!sprintProjectKey) return;
                   if (sprintBoards.length === 0) {
-                     const boards = await getBoards(sprintProjectKey);
-                     setSprintBoards(boards);
+                    const boards = await getBoards(sprintProjectKey);
+                    setSprintBoards(boards);
                   }
                   setCreateSprintModalOpen(true);
                 }}
               >
                 ➕ Tạo Sprint mới
               </button>
-              
+
               <button
                 className="btn btn-secondary"
                 onClick={async () => {
@@ -1824,7 +1828,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
                         <div style={{ fontWeight: 600, fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}>
-                          {sprint.name} 
+                          {sprint.name}
                           <span className={`badge ${isActive ? "badge-inprogress" : sprint.state === "closed" ? "badge-done" : "badge-todo"}`}>
                             {sprint.state.toUpperCase()}
                           </span>
@@ -1835,7 +1839,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
                         {sprint.state === "future" && (
-                          <button 
+                          <button
                             className="btn btn-primary btn-sm"
                             onClick={() => {
                               setStartSprintModalOpen(sprint);
@@ -1845,7 +1849,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                             🚀 Start Sprint
                           </button>
                         )}
-                        <button 
+                        <button
                           className="btn btn-secondary btn-sm"
                           onClick={async () => {
                             if (isExpanded) {
@@ -1879,30 +1883,30 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                         ) : (
                           <div style={{ maxHeight: 350, overflowY: "auto", paddingRight: 8 }}>
                             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                            <thead>
-                              <tr style={{ borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>
-                                <th style={{ padding: "4px 8px", textAlign: "left", width: 100 }}>Key</th>
-                                <th style={{ padding: "4px 8px", textAlign: "left" }}>Tiêu đề</th>
-                                <th style={{ padding: "4px 8px", textAlign: "left", width: 110 }}>Trạng thái</th>
-                                <th style={{ padding: "4px 8px", textAlign: "left", width: 140 }}>Assignee</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {sprintTasks.map(issue => (
-                                <tr key={issue.key} style={{ borderBottom: "1px solid var(--border)" }}>
-                                  <td style={{ padding: "4px 8px" }}>
-                                    <a href={`https://20.84.97.109:3033/browse/${issue.key}`} target="_blank" rel="noreferrer" style={{ color: "var(--accent-blue)" }}>
-                                      {issue.key}
-                                    </a>
-                                  </td>
-                                  <td style={{ padding: "4px 8px" }}>{issue.fields.summary}</td>
-                                  <td style={{ padding: "4px 8px" }}><span className={getBadgeClass(issue.fields.status.name)}>{issue.fields.status.name}</span></td>
-                                  <td style={{ padding: "4px 8px" }}>{issue.fields.assignee?.displayName || "—"}</td>
+                              <thead>
+                                <tr style={{ borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>
+                                  <th style={{ padding: "4px 8px", textAlign: "left", width: 100 }}>Key</th>
+                                  <th style={{ padding: "4px 8px", textAlign: "left" }}>Tiêu đề</th>
+                                  <th style={{ padding: "4px 8px", textAlign: "left", width: 110 }}>Trạng thái</th>
+                                  <th style={{ padding: "4px 8px", textAlign: "left", width: 140 }}>Assignee</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
+                              </thead>
+                              <tbody>
+                                {sprintTasks.map(issue => (
+                                  <tr key={issue.key} style={{ borderBottom: "1px solid var(--border)" }}>
+                                    <td style={{ padding: "4px 8px" }}>
+                                      <a href={`https://20.84.97.109:3033/browse/${issue.key}`} target="_blank" rel="noreferrer" style={{ color: "var(--accent-blue)" }}>
+                                        {issue.key}
+                                      </a>
+                                    </td>
+                                    <td style={{ padding: "4px 8px" }}>{issue.fields.summary}</td>
+                                    <td style={{ padding: "4px 8px" }}><span className={getBadgeClass(issue.fields.status.name)}>{issue.fields.status.name}</span></td>
+                                    <td style={{ padding: "4px 8px" }}>{issue.fields.assignee?.displayName || "—"}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         )}
                       </div>
                     )}
@@ -1926,8 +1930,8 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
             </div>
             <div className="form-group">
               <label>Chọn Sprint</label>
-              <select 
-                value={selectedSprintId} 
+              <select
+                value={selectedSprintId}
                 onChange={e => setSelectedSprintId(Number(e.target.value) || "")}
                 disabled={assignSprintLoading}
               >
@@ -1939,8 +1943,8 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setAssignSprintModalOpen(false)} disabled={assignSprintLoading}>Hủy</button>
-              <button 
-                className="btn btn-primary" 
+              <button
+                className="btn btn-primary"
                 onClick={async () => {
                   if (!selectedSprintId) return;
                   setAssignSprintLoading(true);
@@ -1972,9 +1976,9 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
               <div className="modal-title">Xóa Log Work Hàng Loạt</div>
               <button className="modal-close" onClick={() => !deleteWorklogLoading && setDeleteWorklogModalOpen(false)}>✕</button>
             </div>
-            
+
             <div style={{ marginBottom: 16 }}>
-              Bạn đang chọn <strong>{selectedTasks.length}</strong> task. 
+              Bạn đang chọn <strong>{selectedTasks.length}</strong> task.
               Hệ thống sẽ tìm các worklog do bạn tạo trên những task này và tiến hành xóa.
             </div>
 
@@ -1993,8 +1997,8 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
 
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setDeleteWorklogModalOpen(false)} disabled={deleteWorklogLoading}>Đóng</button>
-              <button 
-                className="btn btn-primary" 
+              <button
+                className="btn btn-primary"
                 style={{ background: "var(--accent-red)" }}
                 onClick={async () => {
                   setDeleteWorklogLoading(true);
@@ -2011,27 +2015,27 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                         const worklogs = await getWorklogs(issueKey);
                         // Filter worklogs by current user
                         const myWorklogs = worklogs.filter(wl => {
-                           const author = wl.author;
-                           return author.name === currentUsername || author.accountId === currentUsername || author.emailAddress === currentUsername;
+                          const author = wl.author;
+                          return author.name === currentUsername || author.accountId === currentUsername || author.emailAddress === currentUsername;
                         });
 
                         if (myWorklogs.length === 0) {
-                           setDeleteWorklogLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: "success", error: "Không có" } : l));
-                           continue;
+                          setDeleteWorklogLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: "success", error: "Không có" } : l));
+                          continue;
                         }
 
                         // Delete each worklog
                         for (const wl of myWorklogs) {
                           await deleteWorklog(issueKey, wl.id, "auto");
                         }
-                        
+
                         setDeleteWorklogLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: "success" } : l));
                       } catch (err: any) {
                         const msg = err.response?.data?.errorMessages?.[0] || err.message || "Lỗi xóa worklog";
                         setDeleteWorklogLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: "error", error: msg } : l));
                       }
                     }
-                    
+
                     // Refresh
                     handleFetchTeamTasks();
                   } catch (err: any) {
@@ -2057,13 +2061,13 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
               <div className="modal-title">Đổi Assignee Hàng Loạt</div>
               <button className="modal-close" onClick={() => !changeAssigneeLoading && setChangeAssigneeModalOpen(false)}>✕</button>
             </div>
-            
+
             <div style={{ marginBottom: 16 }}>
-              Bạn đang chọn <strong>{selectedTasks.length}</strong> task. 
+              Bạn đang chọn <strong>{selectedTasks.length}</strong> task.
             </div>
 
             <div className="form-group">
-              <label>Tài khoản Jira mới <span style={{color:"red"}}>*</span></label>
+              <label>Tài khoản Jira mới <span style={{ color: "red" }}>*</span></label>
               <input
                 type="text"
                 list="assignable-users-list-modal"
@@ -2099,8 +2103,8 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
 
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setChangeAssigneeModalOpen(false)} disabled={changeAssigneeLoading}>Đóng</button>
-              <button 
-                className="btn btn-primary" 
+              <button
+                className="btn btn-primary"
                 onClick={async () => {
                   if (!newAssigneeName.trim()) {
                     alert("Vui lòng nhập tên tài khoản mới");
@@ -2117,9 +2121,9 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                         await assignIssue(issueKey, newAssigneeName.trim());
                         setChangeAssigneeLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: "success" } : l));
                       } catch (err: any) {
-                         const msg = err.response?.data?.errorMessages?.[0] || err.message || "Lỗi gán người dùng";
-                         setChangeAssigneeLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: "error", error: msg } : l));
-                         console.warn(`Failed to assign ${issueKey}`, err);
+                        const msg = err.response?.data?.errorMessages?.[0] || err.message || "Lỗi gán người dùng";
+                        setChangeAssigneeLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: "error", error: msg } : l));
+                        console.warn(`Failed to assign ${issueKey}`, err);
                       }
                     }
                     // Refresh
@@ -2146,13 +2150,13 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
               <button className="modal-close" onClick={() => !createSprintLoading && setCreateSprintModalOpen(false)}>✕</button>
             </div>
             <div className="form-group">
-              <label>Tên Sprint <span style={{color:"red"}}>*</span></label>
-              <input type="text" value={createSprintForm.name} onChange={e => setCreateSprintForm({...createSprintForm, name: e.target.value})} placeholder="VD: Sprint 1" />
+              <label>Tên Sprint <span style={{ color: "red" }}>*</span></label>
+              <input type="text" value={createSprintForm.name} onChange={e => setCreateSprintForm({ ...createSprintForm, name: e.target.value })} placeholder="VD: Sprint 1" />
             </div>
             <div className="form-group">
-              <label>Board <span style={{color:"red"}}>*</span></label>
-              <select 
-                value={sprintBoardId} 
+              <label>Board <span style={{ color: "red" }}>*</span></label>
+              <select
+                value={sprintBoardId}
                 onChange={e => setSprintBoardId(Number(e.target.value) || "")}
               >
                 <option value="">-- Chọn Board --</option>
@@ -2165,21 +2169,21 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
             <div style={{ display: "flex", gap: 12 }}>
               <div className="form-group" style={{ flex: 1 }}>
                 <label>Start Date</label>
-                <input type="datetime-local" value={createSprintForm.startDate} onChange={e => setCreateSprintForm({...createSprintForm, startDate: e.target.value})} />
+                <input type="datetime-local" value={createSprintForm.startDate} onChange={e => setCreateSprintForm({ ...createSprintForm, startDate: e.target.value })} />
               </div>
               <div className="form-group" style={{ flex: 1 }}>
                 <label>End Date</label>
-                <input type="datetime-local" value={createSprintForm.endDate} onChange={e => setCreateSprintForm({...createSprintForm, endDate: e.target.value})} />
+                <input type="datetime-local" value={createSprintForm.endDate} onChange={e => setCreateSprintForm({ ...createSprintForm, endDate: e.target.value })} />
               </div>
             </div>
             <div className="form-group">
               <label>Mục tiêu (Goal)</label>
-              <textarea value={createSprintForm.goal} onChange={e => setCreateSprintForm({...createSprintForm, goal: e.target.value})} rows={3} placeholder="Mục tiêu của sprint..." />
+              <textarea value={createSprintForm.goal} onChange={e => setCreateSprintForm({ ...createSprintForm, goal: e.target.value })} rows={3} placeholder="Mục tiêu của sprint..." />
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setCreateSprintModalOpen(false)} disabled={createSprintLoading}>Hủy</button>
-              <button 
-                className="btn btn-primary" 
+              <button
+                className="btn btn-primary"
                 onClick={async () => {
                   if (!createSprintForm.name || !sprintBoardId) {
                     alert("Vui lòng nhập Tên Sprint và chọn Board");
@@ -2228,52 +2232,52 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
               <button className="modal-close" onClick={() => !startSprintLoading && setStartSprintModalOpen(null)}>✕</button>
             </div>
             <div className="form-group">
-              <label>Tên Sprint <span style={{color:"red"}}>*</span></label>
-              <input type="text" value={startSprintForm.name} onChange={e => setStartSprintForm({...startSprintForm, name: e.target.value})} />
+              <label>Tên Sprint <span style={{ color: "red" }}>*</span></label>
+              <input type="text" value={startSprintForm.name} onChange={e => setStartSprintForm({ ...startSprintForm, name: e.target.value })} />
             </div>
             <div style={{ display: "flex", gap: 12 }}>
               <div className="form-group" style={{ flex: 1 }}>
-                <label>Start Date <span style={{color:"red"}}>*</span></label>
-                <input type="datetime-local" value={startSprintForm.startDate} onChange={e => setStartSprintForm({...startSprintForm, startDate: e.target.value})} />
+                <label>Start Date <span style={{ color: "red" }}>*</span></label>
+                <input type="datetime-local" value={startSprintForm.startDate} onChange={e => setStartSprintForm({ ...startSprintForm, startDate: e.target.value })} />
               </div>
               <div className="form-group" style={{ flex: 1 }}>
-                <label>End Date <span style={{color:"red"}}>*</span></label>
-                <input type="datetime-local" value={startSprintForm.endDate} onChange={e => setStartSprintForm({...startSprintForm, endDate: e.target.value})} />
+                <label>End Date <span style={{ color: "red" }}>*</span></label>
+                <input type="datetime-local" value={startSprintForm.endDate} onChange={e => setStartSprintForm({ ...startSprintForm, endDate: e.target.value })} />
               </div>
             </div>
             <div className="form-group">
               <label>Mục tiêu (Goal)</label>
-              <textarea value={startSprintForm.goal} onChange={e => setStartSprintForm({...startSprintForm, goal: e.target.value})} rows={3} />
+              <textarea value={startSprintForm.goal} onChange={e => setStartSprintForm({ ...startSprintForm, goal: e.target.value })} rows={3} />
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setStartSprintModalOpen(null)} disabled={startSprintLoading}>Hủy</button>
-              <button 
-                className="btn btn-primary" 
+              <button
+                className="btn btn-primary"
                 onClick={async () => {
                   if (!startSprintForm.name || !startSprintForm.startDate || !startSprintForm.endDate) {
                     alert("Vui lòng điền đủ Tên, Start Date và End Date");
                     return;
                   }
                   if (!sprintBoardId) {
-                     alert("Không xác định được Board ID để bắt đầu Sprint.");
-                     return;
+                    alert("Không xác định được Board ID để bắt đầu Sprint.");
+                    return;
                   }
                   setStartSprintLoading(true);
                   try {
                     // Cần format date dạng dd/MMM/yyyy hh:mm a theo như CURL mẫu: "15/Jun/2026 07:02 PM"
                     const formatToGreenhopperDate = (dString: string) => {
-                       const d = new Date(dString);
-                       const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-                       const dd = String(d.getDate()).padStart(2, '0');
-                       const mmm = months[d.getMonth()];
-                       const yyyy = d.getFullYear();
-                       let hh = d.getHours();
-                       const mm = String(d.getMinutes()).padStart(2, '0');
-                       const ampm = hh >= 12 ? 'PM' : 'AM';
-                       hh = hh % 12;
-                       if (hh === 0) hh = 12;
-                       const hhStr = String(hh).padStart(2, '0');
-                       return `${dd}/${mmm}/${yyyy} ${hhStr}:${mm} ${ampm}`;
+                      const d = new Date(dString);
+                      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                      const dd = String(d.getDate()).padStart(2, '0');
+                      const mmm = months[d.getMonth()];
+                      const yyyy = d.getFullYear();
+                      let hh = d.getHours();
+                      const mm = String(d.getMinutes()).padStart(2, '0');
+                      const ampm = hh >= 12 ? 'PM' : 'AM';
+                      hh = hh % 12;
+                      if (hh === 0) hh = 12;
+                      const hhStr = String(hh).padStart(2, '0');
+                      return `${dd}/${mmm}/${yyyy} ${hhStr}:${mm} ${ampm}`;
                     };
 
                     const payload: any = {
@@ -2286,7 +2290,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
 
                     await startSprint(startSprintModalOpen.id, payload);
                     setStartSprintModalOpen(null);
-                    
+
                     if (activeTab === "sprints") {
                       setSprintsLoading(true);
                       const sps = await getSprints(sprintBoardId as number);

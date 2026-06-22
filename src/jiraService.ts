@@ -280,18 +280,18 @@ export async function getAllIssuesByJql(
     const res = await jiraApi.get("/search", {
       params: { jql, maxResults, startAt, fields: fields.join(",") },
     });
-    
+
     const { issues, total } = res.data;
     if (issues && issues.length > 0) {
       allIssues = allIssues.concat(issues);
     }
-    
+
     if (!issues || issues.length === 0 || allIssues.length >= total || allIssues.length >= maxLimit) {
       break;
     }
     startAt += maxResults;
   }
-  
+
   return allIssues;
 }
 
@@ -418,15 +418,15 @@ export async function getProjectCreateMeta(projectKey: string, issueTypeName: st
     try {
       const res = await jiraApi.get(`/issue/createmeta/${projectKey}/issuetypes`);
       const list = Array.isArray(res.data) ? res.data : (res.data.values || []);
-      const taskType = list.find((t: any) => 
-        t.name.toLowerCase().includes(issueTypeName.toLowerCase()) || 
+      const taskType = list.find((t: any) =>
+        t.name.toLowerCase().includes(issueTypeName.toLowerCase()) ||
         t.name.toLowerCase() === issueTypeName.toLowerCase()
       ) || list[0];
 
       if (taskType) {
         issuetypeId = taskType.id;
       }
-      
+
       if (projectId && issuetypeId) {
         return { projectId, issuetypeId };
       }
@@ -444,8 +444,8 @@ export async function getProjectCreateMeta(projectKey: string, issueTypeName: st
       });
       const project = legacyRes.data.projects?.[0];
       if (project) {
-        const taskType = project.issuetypes.find((t: any) => 
-          t.name.toLowerCase().includes(issueTypeName.toLowerCase()) || 
+        const taskType = project.issuetypes.find((t: any) =>
+          t.name.toLowerCase().includes(issueTypeName.toLowerCase()) ||
           t.name.toLowerCase() === issueTypeName.toLowerCase()
         ) || project.issuetypes[0];
 
@@ -527,7 +527,7 @@ export async function createSubTask(options: {
   const projRes = await jiraApi.get(`/project/${options.projectKey}`);
   const issuetypes = projRes.data.issueTypes;
   const subTaskType = issuetypes.find((t: any) => t.subtask);
-  
+
   if (!subTaskType) {
     throw new Error(`Dự án ${options.projectKey} không hỗ trợ loại Issue là Sub-task`);
   }
@@ -693,7 +693,7 @@ export type JiraNotification = {
 export async function getRecentNotificationsForUser(): Promise<JiraNotification[]> {
   const jql = `assignee = currentUser() AND updated >= -14d ORDER BY updated DESC`;
   const maxResults = 50;
-  
+
   try {
     const res = await jiraApi.get("/search", {
       params: {
