@@ -155,6 +155,7 @@ export default function Teams() {
   const [expandedSprintId, setExpandedSprintId] = useState<number | null>(null);
   const [sprintTasks, setSprintTasks] = useState<JiraIssue[]>([]);
   const [sprintTasksLoading, setSprintTasksLoading] = useState(false);
+  const [showClosedSprints, setShowClosedSprints] = useState(false);
 
   // Modals for Sprints
   const [createSprintModalOpen, setCreateSprintModalOpen] = useState(false);
@@ -731,7 +732,74 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
     return { uatBugs, prodBugs, tasks, estimateSecs, loggedSecs };
   }, [statTasks, useStatDateFilter, statDateFrom, statDateTo]);
 
+  // Derived state for Sprints
+  const displayedSprints = useMemo(() => {
+    let list = sprintsList;
+    if (!showClosedSprints) {
+      list = list.filter(s => s.state !== "closed");
+    }
+    const order = { active: 1, future: 2, closed: 3 };
+    return [...list].sort((a, b) => {
+      const oa = order[a.state as keyof typeof order] || 99;
+      const ob = order[b.state as keyof typeof order] || 99;
+      if (oa !== ob) return oa - ob;
+      return b.id - a.id;
+    });
+  }, [sprintsList, showClosedSprints]);
+
+  const { rootTasks, subTasksMap } = useMemo(() => {
+    const roots: JiraIssue[] = [];
+    const map: Record<string, JiraIssue[]> = {};
+    const allKeys = new Set(sprintTasks.map(t => t.key));
+
+    sprintTasks.forEach(issue => {
+      const parentKey = issue.fields.parent?.key;
+      if (parentKey && allKeys.has(parentKey)) {
+        if (!map[parentKey]) map[parentKey] = [];
+        map[parentKey].push(issue);
+      } else {
+        roots.push(issue);
+      }
+    });
+    return { rootTasks: roots, subTasksMap: map };
+  }, [sprintTasks]);
+
   // ─── Render helpers ────────────────────────────────────────────────────────
+
+  const renderSprintIssueRow = (issue: JiraIssue, isSubtask = false) => {
+    const startDate = issue.fields.customfield_10300 || issue.fields.created;
+    const endDate = issue.fields.customfield_10302 || issue.fields.duedate;
+    const startStr = startDate ? new Date(startDate).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "";
+    const endStr = endDate ? new Date(endDate).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "";
+    
+    return (
+      <tr key={issue.key} style={{ borderBottom: "1px solid var(--border)", background: isSubtask ? "rgba(0,0,0,0.02)" : "transparent" }}>
+        <td style={{ padding: "8px", paddingLeft: isSubtask ? 32 : 8, width: 140 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {isSubtask && <span style={{ color: "var(--border)", fontSize: 16 }}>↳</span>}
+            <a href={`https://20.84.97.109:3033/browse/${issue.key}`} target="_blank" rel="noreferrer" style={{ color: "var(--accent-blue)", textDecoration: "none", fontSize: 13, fontWeight: 600 }}>
+              {issue.key}
+            </a>
+          </div>
+        </td>
+        <td style={{ padding: "8px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {issue.fields.issuetype?.iconUrl && <img src={issue.fields.issuetype.iconUrl} alt="type" style={{ width: 16, height: 16, borderRadius: 2 }} />}
+            <span style={{ fontSize: 13 }}>{issue.fields.summary}</span>
+          </div>
+        </td>
+        <td style={{ padding: "8px", width: 140 }}><span className={getBadgeClass(issue.fields.status.name)}>{issue.fields.status.name}</span></td>
+        <td style={{ padding: "8px", width: 180 }}>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", display: "flex", flexDirection: "column" }}>
+            {startStr && <span><span style={{ color: "var(--text-muted)", fontSize: 10 }}>START</span> {startStr}</span>}
+            {endStr && <span><span style={{ color: "var(--text-muted)", fontSize: 10 }}>END</span> {endStr}</span>}
+            {!startStr && !endStr && "—"}
+          </div>
+        </td>
+        <td style={{ padding: "8px", width: 140, fontSize: 12, color: "var(--text-primary)" }}>{issue.fields.assignee?.displayName || "—"}</td>
+      </tr>
+    );
+  };
 
   const tabs: { id: Tab; icon: string; label: string }[] = [
     { id: "teams", icon: "🏢", label: "Quản lý Teams" },
@@ -1264,14 +1332,26 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                       {log.status === "pending" && <span style={{ color: "var(--text-muted)" }}>⏳ Đang chờ</span>}
                       {log.status === "processing" && <span style={{ color: "var(--accent-blue)" }} className="spinning-slow">🌀 Đang tạo...</span>}
                       {log.status === "success" && (
-                        <a
-                          href={`https://20.84.97.109:3033/browse/${log.key}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{ color: "var(--accent-green)", fontWeight: 700, textDecoration: "none", background: "rgba(16,185,129,0.1)", padding: "3px 8px", borderRadius: 6 }}
-                        >
-                          ✅ {log.key} ↗
-                        </a>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <a
+                            href={`https://20.84.97.109:3033/browse/${log.key}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ color: "var(--accent-green)", fontWeight: 700, textDecoration: "none", background: "rgba(16,185,129,0.1)", padding: "3px 8px", borderRadius: 6 }}
+                          >
+                            ✅ {log.key} ↗
+                          </a>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            title="Copy Link"
+                            onClick={() => {
+                              navigator.clipboard.writeText(`https://20.84.97.109:3033/browse/${log.key}`);
+                            }}
+                            style={{ padding: "2px 6px", fontSize: 12, background: "transparent", border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer", color: "var(--text-secondary)" }}
+                          >
+                            📋
+                          </button>
+                        </div>
                       )}
                       {log.status === "error" && <span style={{ color: "var(--accent-red)" }}>❌ {log.error}</span>}
                     </div>
@@ -1805,6 +1885,15 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
               >
                 🔄 Làm mới
               </button>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", marginLeft: "auto" }}>
+                <input
+                  type="checkbox"
+                  checked={showClosedSprints}
+                  onChange={e => setShowClosedSprints(e.target.checked)}
+                  style={{ margin: 0, cursor: "pointer" }}
+                />
+                Hiển thị Sprint đã đóng
+              </label>
             </div>
           </div>
 
@@ -1818,7 +1907,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {sprintsList.map(sprint => {
+              {displayedSprints.map(sprint => {
                 const isActive = sprint.state === "active";
                 const isExpanded = expandedSprintId === sprint.id;
                 return (
@@ -1882,26 +1971,19 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                           <div style={{ maxHeight: 350, overflowY: "auto", paddingRight: 8 }}>
                             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                               <thead>
-                                <tr style={{ borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>
-                                  <th style={{ padding: "4px 8px", textAlign: "left", width: 100 }}>Key</th>
+                                <tr style={{ borderBottom: "1px solid var(--border)", color: "var(--text-secondary)", fontSize: 12 }}>
+                                  <th style={{ padding: "4px 8px", textAlign: "left", width: 140 }}>Key</th>
                                   <th style={{ padding: "4px 8px", textAlign: "left" }}>Tiêu đề</th>
-                                  <th style={{ padding: "4px 8px", textAlign: "left", width: 110 }}>Trạng thái</th>
+                                  <th style={{ padding: "4px 8px", textAlign: "left", width: 140 }}>Trạng thái</th>
+                                  <th style={{ padding: "4px 8px", textAlign: "left", width: 180 }}>Thời gian</th>
                                   <th style={{ padding: "4px 8px", textAlign: "left", width: 140 }}>Assignee</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {sprintTasks.map(issue => (
-                                  <tr key={issue.key} style={{ borderBottom: "1px solid var(--border)" }}>
-                                    <td style={{ padding: "4px 8px" }}>
-                                      <a href={`https://20.84.97.109:3033/browse/${issue.key}`} target="_blank" rel="noreferrer" style={{ color: "var(--accent-blue)" }}>
-                                        {issue.key}
-                                      </a>
-                                    </td>
-                                    <td style={{ padding: "4px 8px" }}>{issue.fields.summary}</td>
-                                    <td style={{ padding: "4px 8px" }}><span className={getBadgeClass(issue.fields.status.name)}>{issue.fields.status.name}</span></td>
-                                    <td style={{ padding: "4px 8px" }}>{issue.fields.assignee?.displayName || "—"}</td>
-                                  </tr>
-                                ))}
+                                {rootTasks.map(rootIssue => [
+                                  renderSprintIssueRow(rootIssue, false),
+                                  ...(subTasksMap[rootIssue.key]?.map(sub => renderSprintIssueRow(sub, true)) || [])
+                                ])}
                               </tbody>
                             </table>
                           </div>
