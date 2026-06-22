@@ -1706,8 +1706,6 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
           </div>
         )}
 
-      </div>
-
       {/* ─── TAB 6: Quản lý Sprint ───────────────────────────────────── */}
       {activeTab === "sprints" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "0 24px" }}>
@@ -1917,6 +1915,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
           )}
         </div>
       )}
+      </div>
 
       {/* ─── MODALS ───────────────────────────────────────────────────────────── */}
 
