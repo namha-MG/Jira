@@ -1471,10 +1471,10 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                   </div>
                 </div>
 
-                <div style={{ overflowX: "auto" }}>
+                <div style={{ maxHeight: "calc(100vh - 300px)", minHeight: 200, overflow: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                    <thead>
-                      <tr style={{ borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>
+                    <thead style={{ position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 1, boxShadow: "0 1px 0 var(--border)" }}>
+                      <tr style={{ color: "var(--text-secondary)" }}>
                         <th style={{ padding: "8px 12px", width: 40 }}>
                           <input
                             type="checkbox"
