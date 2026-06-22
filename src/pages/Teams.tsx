@@ -143,6 +143,7 @@ export default function Teams() {
   const [changeAssigneeModalOpen, setChangeAssigneeModalOpen] = useState(false);
   const [changeAssigneeLoading, setChangeAssigneeLoading] = useState(false);
   const [newAssigneeName, setNewAssigneeName] = useState("");
+  const [changeAssigneeLogs, setChangeAssigneeLogs] = useState<{issueKey: string; status: "pending"|"success"|"error"; error?: string}[]>([]);
 
   // ── Tab 6: Sprints ────────────────────────────────────────────────────────
   const [sprintProjectKey, setSprintProjectKey] = useState(JIRA_PROJECTS[0].key);
@@ -2051,7 +2052,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       {/* Change Assignee Modal */}
       {changeAssigneeModalOpen && (
         <div className="modal-overlay" onClick={() => !changeAssigneeLoading && setChangeAssigneeModalOpen(false)}>
-          <div className="modal" style={{ maxWidth: 450 }} onClick={e => e.stopPropagation()}>
+          <div className="modal" style={{ maxWidth: 500 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <div className="modal-title">Đổi Assignee Hàng Loạt</div>
               <button className="modal-close" onClick={() => !changeAssigneeLoading && setChangeAssigneeModalOpen(false)}>✕</button>
@@ -2083,8 +2084,21 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
               )}
             </div>
 
+            {changeAssigneeLogs.length > 0 && (
+              <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: 12, maxHeight: 200, overflowY: "auto", marginBottom: 16 }}>
+                {changeAssigneeLogs.map((log, idx) => (
+                  <div key={idx} style={{ display: "flex", gap: 8, marginBottom: 4, fontSize: 13 }}>
+                    <span style={{ width: 100, fontWeight: 500 }}>{log.issueKey}</span>
+                    {log.status === "pending" && <span style={{ color: "var(--text-muted)" }}>⏳ Đang chờ...</span>}
+                    {log.status === "success" && <span style={{ color: "var(--accent-green)" }}>✅ Thành công</span>}
+                    {log.status === "error" && <span style={{ color: "var(--accent-red)" }}>❌ {log.error}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setChangeAssigneeModalOpen(false)} disabled={changeAssigneeLoading}>Hủy</button>
+              <button className="btn btn-secondary" onClick={() => setChangeAssigneeModalOpen(false)} disabled={changeAssigneeLoading}>Đóng</button>
               <button 
                 className="btn btn-primary" 
                 onClick={async () => {
@@ -2093,22 +2107,28 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                     return;
                   }
                   setChangeAssigneeLoading(true);
+                  const logs = selectedTasks.map(key => ({ issueKey: key, status: "pending" as const }));
+                  setChangeAssigneeLogs(logs);
+
                   try {
-                    for (const issueKey of selectedTasks) {
+                    for (let i = 0; i < selectedTasks.length; i++) {
+                      const issueKey = selectedTasks[i];
                       try {
                         await assignIssue(issueKey, newAssigneeName.trim());
-                      } catch (err) {
+                        setChangeAssigneeLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: "success" } : l));
+                      } catch (err: any) {
+                         const msg = err.response?.data?.errorMessages?.[0] || err.message || "Lỗi gán người dùng";
+                         setChangeAssigneeLogs(prev => prev.map((l, idx) => idx === i ? { ...l, status: "error", error: msg } : l));
                          console.warn(`Failed to assign ${issueKey}`, err);
                       }
                     }
-                    setChangeAssigneeModalOpen(false);
                     // Refresh
                     handleFetchTeamTasks();
                   } finally {
                     setChangeAssigneeLoading(false);
                   }
                 }}
-                disabled={changeAssigneeLoading || !newAssigneeName.trim()}
+                disabled={changeAssigneeLoading || !newAssigneeName.trim() || (changeAssigneeLogs.length > 0 && changeAssigneeLogs.every(l => l.status !== "pending"))}
               >
                 {changeAssigneeLoading ? "Đang xử lý..." : "Cập nhật"}
               </button>

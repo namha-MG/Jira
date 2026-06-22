@@ -346,9 +346,18 @@ export async function assignIssue(
   issueKey: string,
   assigneeName: string
 ): Promise<void> {
-  await jiraApi.put(`/issue/${issueKey}/assignee`, {
-    name: assigneeName,
-  });
+  try {
+    await jiraApi.put(`/issue/${issueKey}/assignee`, {
+      name: assigneeName,
+    });
+  } catch (err: any) {
+    console.warn("assignee API failed, trying fallback update issue:", err);
+    await jiraApi.put(`/issue/${issueKey}`, {
+      fields: {
+        assignee: { name: assigneeName }
+      }
+    });
+  }
 }
 
 /** Cập nhật estimate của issue */
