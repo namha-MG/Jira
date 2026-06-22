@@ -14,6 +14,12 @@ export default function UnassignedIssues() {
   const [selectedProject, setSelectedProject] = useState(JIRA_PROJECTS[0].key);
   const [issues, setIssues] = useState<JiraIssue[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dateFrom, setDateFrom] = useState(() => {
+    const d = new Date();
+    d.setDate(1);
+    return d.toISOString().slice(0, 10);
+  });
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [page, setPage] = useState(1);
   const pageSize = 50;
   
@@ -28,7 +34,8 @@ export default function UnassignedIssues() {
     try {
       setLoading(true);
       setPage(1);
-      const jql = `project = "${selectedProject}" AND assignee is EMPTY ORDER BY updated DESC`;
+      const dateClause = ` AND updated >= "${dateFrom} 00:00" AND updated <= "${dateTo} 23:59"`;
+      const jql = `project = "${selectedProject}" AND assignee is EMPTY${dateClause} ORDER BY updated DESC`;
       const data = await getAllIssuesByJql(jql, 500); // Lấy tối đa 500 task chưa gán
       setIssues(data);
     } catch (e: any) {
@@ -38,7 +45,7 @@ export default function UnassignedIssues() {
     } finally {
       setLoading(false);
     }
-  }, [selectedProject]);
+  }, [selectedProject, dateFrom, dateTo]);
 
   useEffect(() => {
     fetchUnassignedIssues();
@@ -90,6 +97,12 @@ export default function UnassignedIssues() {
           <p className="page-subtitle">Danh sách các Issue/Sub-task chưa được phân công cho bất kỳ ai.</p>
         </div>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <div className="form-group" style={{ margin: 0, display: "flex", gap: 8, alignItems: "center" }}>
+            <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>Từ:</span>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ padding: "6px 10px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 6 }} disabled={loading} />
+            <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>Đến:</span>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ padding: "6px 10px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 6 }} disabled={loading} />
+          </div>
           <div className="form-group" style={{ margin: 0 }}>
             <select
               value={selectedProject}
