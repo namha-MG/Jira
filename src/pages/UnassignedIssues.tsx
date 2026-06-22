@@ -14,6 +14,8 @@ export default function UnassignedIssues() {
   const [selectedProject, setSelectedProject] = useState(JIRA_PROJECTS[0].key);
   const [issues, setIssues] = useState<JiraIssue[]>([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
   
   // Assign modal state
   const [assignModalOpen, setAssignModalOpen] = useState<JiraIssue | null>(null);
@@ -25,6 +27,7 @@ export default function UnassignedIssues() {
   const fetchUnassignedIssues = useCallback(async () => {
     try {
       setLoading(true);
+      setPage(1);
       const jql = `project = "${selectedProject}" AND assignee is EMPTY ORDER BY updated DESC`;
       const data = await getAllIssuesByJql(jql, 500); // Lấy tối đa 500 task chưa gán
       setIssues(data);
@@ -76,6 +79,8 @@ export default function UnassignedIssues() {
       setAssigning(false);
     }
   };
+  const totalPages = Math.ceil(issues.length / pageSize);
+  const paginatedIssues = issues.slice((page - 1) * pageSize, page * pageSize);
 
   return (
     <div className="page-container" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
@@ -133,7 +138,7 @@ export default function UnassignedIssues() {
                   </td>
                 </tr>
               ) : (
-                issues.map(issue => {
+                paginatedIssues.map(issue => {
                   const createdDate = new Date(issue.fields.created).toLocaleDateString("vi-VN", {
                     day: "2-digit", month: "2-digit", year: "numeric"
                   });
@@ -193,6 +198,20 @@ export default function UnassignedIssues() {
             </tbody>
           </table>
         </div>
+        {totalPages > 1 && (
+          <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--bg-card)", borderBottomLeftRadius: 10, borderBottomRightRadius: 10 }}>
+            <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+              Hiển thị {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, issues.length)} / {issues.length} task
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>Trước</button>
+              <div style={{ display: "flex", alignItems: "center", padding: "0 8px", fontSize: 13, fontWeight: 500 }}>
+                Trang {page} / {totalPages}
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Sau</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Assign Modal */}
