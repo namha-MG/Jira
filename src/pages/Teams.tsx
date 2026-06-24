@@ -21,6 +21,7 @@ import {
   getCurrentUser
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
+import { copyToClipboard } from "../utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1345,7 +1346,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                             className="btn btn-secondary btn-sm"
                             title="Copy Link"
                             onClick={() => {
-                              navigator.clipboard.writeText(`https://20.84.97.109:3033/browse/${log.key}`);
+                              copyToClipboard(`https://20.84.97.109:3033/browse/${log.key}`);
                             }}
                             style={{ padding: "2px 6px", fontSize: 12, background: "transparent", border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer", color: "var(--text-secondary)" }}
                           >
