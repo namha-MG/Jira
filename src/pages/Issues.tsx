@@ -4,6 +4,7 @@ import {
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
+import UserSelect from "../components/UserSelect";
 
 function normalizeText(str?: string) {
   if (!str) return "";
@@ -536,23 +537,18 @@ export default function Issues() {
               <option value="all">Tất cả loại task</option>
               {uniqueTypes.map((t) => <option key={t as string} value={t as string}>{t}</option>)}
             </select>
-            <select
-              id="select-assignee-filter"
-              value={assigneeFilter}
-              onChange={(e) => setAssigneeFilter(e.target.value)}
-              style={{ width: 150 }}
-            >
-              <option value="all">Tất cả Assignee</option>
-              <option value="unassigned">Chưa phân công</option>
-              {uniqueAssignees.map((a) => {
-                const userKey = a.name || a.accountId || a.emailAddress;
-                return (
-                  <option key={userKey} value={userKey}>
-                    {a.displayName}
-                  </option>
-                );
-              })}
-            </select>
+            <div style={{ width: 150 }}>
+              <UserSelect
+                users={[
+                  { accountId: "all", displayName: "Tất cả Assignee", name: "all" } as JiraUser,
+                  { accountId: "unassigned", displayName: "Chưa phân công", name: "unassigned" } as JiraUser,
+                  ...uniqueAssignees
+                ]}
+                value={assigneeFilter}
+                onChange={setAssigneeFilter}
+                placeholder="-- Assignee --"
+              />
+            </div>
             <select
               id="select-advanced-filter"
               value={advancedFilter}
@@ -572,23 +568,30 @@ export default function Issues() {
         )}
 
         {/* Table */}
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th onClick={() => handleSort("key")} style={{ cursor: "pointer" }}>Key{sortIndicator("key")}</th>
-                <th>Tóm tắt</th>
-                <th>Người xử lý</th>
-                <th>Trạng thái</th>
-                <th>Loại</th>
-                <th onClick={() => handleSort("startDate")} style={{ cursor: "pointer" }}>Start Date{sortIndicator("startDate")}</th>
-                <th onClick={() => handleSort("estimate")} style={{ cursor: "pointer" }}>Estimate{sortIndicator("estimate")}</th>
-                <th onClick={() => handleSort("logged")} style={{ cursor: "pointer" }}>Logged{sortIndicator("logged")}</th>
-                <th>Tiến độ</th>
-                <th onClick={() => handleSort("updated")} style={{ cursor: "pointer" }}>Cập nhật{sortIndicator("updated")}</th>
-                <th></th>
-              </tr>
-            </thead>
+        {(() => {
+          const totalFilteredLoggedSeconds = filtered.reduce((sum, issue) => {
+            return sum + (issue.fields.timetracking?.timeSpentSeconds || 0);
+          }, 0);
+          const totalFilteredLoggedHours = (totalFilteredLoggedSeconds / 3600).toFixed(1);
+
+          return (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th onClick={() => handleSort("key")} style={{ cursor: "pointer" }}>Key{sortIndicator("key")}</th>
+                    <th>Tóm tắt</th>
+                    <th>Người xử lý</th>
+                    <th>Trạng thái</th>
+                    <th>Loại</th>
+                    <th onClick={() => handleSort("startDate")} style={{ cursor: "pointer" }}>Start Date{sortIndicator("startDate")}</th>
+                    <th onClick={() => handleSort("estimate")} style={{ cursor: "pointer" }}>Estimate{sortIndicator("estimate")}</th>
+                    <th onClick={() => handleSort("logged")} style={{ cursor: "pointer" }}>Logged ({totalFilteredLoggedHours}h){sortIndicator("logged")}</th>
+                    <th>Tiến độ</th>
+                    <th onClick={() => handleSort("updated")} style={{ cursor: "pointer" }}>Cập nhật{sortIndicator("updated")}</th>
+                    <th></th>
+                  </tr>
+                </thead>
             <tbody>
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => (
@@ -740,6 +743,20 @@ export default function Issues() {
                             + Sub-task
                           </button>
                         )}
+                        {log === 0 && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ color: "var(--accent-green)", marginLeft: 4 }}
+                            onClick={() => {
+                              setLogWorkModalOpen({ key: issue.key, summary: issue.fields.summary });
+                              setLogWorkTime("");
+                              setLogWorkComment("");
+                            }}
+                            title="Log Work"
+                          >
+                            ⏱️ Log Work
+                          </button>
+                        )}
                         {isBugTask(issue.fields.issuetype?.name) && 
                          !["closed", "đóng", "hoàn thành", "commit"].some(s => issue.fields.status?.name?.toLowerCase().includes(s)) && (
                             <button
@@ -760,6 +777,8 @@ export default function Issues() {
             </tbody>
           </table>
         </div>
+        );
+      })()}
 
         {/* Pagination */}
         {totalPages > 1 && !loading && (

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { testConnection, JiraUser } from "../jiraService";
 import { JIRA_BASE_URL, msalConfig, JIRA_PROJECTS } from "../config";
+import { getHolidays, saveHolidays, DEFAULT_HOLIDAYS } from "../utils";
 
 interface Toast { id: number; type: "success" | "error" | "info"; msg: string; }
 
@@ -9,6 +10,8 @@ export default function Settings() {
   const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
   const [jiraUrl, setJiraUrl] = useState(() => localStorage.getItem("jira_url") || JIRA_BASE_URL);
   const [defaultProject, setDefaultProject] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
+  const [holidays, setHolidays] = useState<string[]>([]);
+  const [newHoliday, setNewHoliday] = useState("");
   const [testing, setTesting] = useState(false);
   const [connStatus, setConnStatus] = useState<null | { ok: boolean; user?: JiraUser; msg?: string }>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -30,6 +33,7 @@ export default function Settings() {
   // Check existing connection on mount
   useEffect(() => {
     const savedPat = localStorage.getItem("jira_pat");
+    setHolidays(getHolidays());
     if (savedPat) {
       testConn();
     }
@@ -63,6 +67,7 @@ export default function Settings() {
     }
     localStorage.setItem("jira_url", jiraUrl.trim() || JIRA_BASE_URL);
     localStorage.setItem("default_project", defaultProject);
+    saveHolidays(holidays);
 
     // Test connection
     await testConn();
@@ -277,6 +282,64 @@ export default function Settings() {
                 </ol>
               </div>
             </details>
+          </div>
+
+          {/* Holidays Config */}
+          <div className="settings-section">
+            <div className="settings-section-title">🏖️ Quản lý Ngày nghỉ lễ</div>
+            <div className="settings-section-desc">
+              Khai báo các ngày nghỉ lễ để hệ thống tính toán chính xác số giờ làm việc chuẩn trên Dashboard.
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <input
+                type="date"
+                value={newHoliday}
+                onChange={(e) => setNewHoliday(e.target.value)}
+                style={{ flex: 1, maxWidth: 200 }}
+              />
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  if (newHoliday && !holidays.includes(newHoliday)) {
+                    const next = [...holidays, newHoliday].sort();
+                    setHolidays(next);
+                    setNewHoliday("");
+                  }
+                }}
+              >
+                + Thêm
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={() => {
+                  if (confirm("Bạn có chắc chắn muốn khôi phục danh sách mặc định không?")) {
+                    setHolidays(DEFAULT_HOLIDAYS);
+                  }
+                }}
+              >
+                Khôi phục mặc định
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, maxHeight: 200, overflowY: "auto", padding: 12, background: "var(--bg-card)", borderRadius: 8, border: "1px solid var(--border)" }}>
+              {holidays.length === 0 && <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Chưa có ngày nghỉ lễ nào.</span>}
+              {holidays.map(d => (
+                <div key={d} style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg-secondary)", border: "1px solid var(--border)", padding: "4px 8px", borderRadius: 16, fontSize: 13 }}>
+                  <span>{d}</span>
+                  <button
+                    className="btn-ghost"
+                    style={{ padding: 0, width: 20, height: 20, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent-red)", cursor: "pointer", border: "none", background: "transparent" }}
+                    onClick={() => setHolidays(holidays.filter(h => h !== d))}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+              Chú ý: Nhớ bấm <strong style={{ color: "var(--text-primary)" }}>Lưu & Kết nối</strong> ở bên trên để lưu danh sách!
+            </div>
           </div>
 
           {/* Azure Info */}

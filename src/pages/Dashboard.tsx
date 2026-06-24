@@ -8,6 +8,7 @@ import {
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
+import { getHolidays } from "../utils";
 
 interface ProjectStat {
   projectKey: string;
@@ -56,6 +57,8 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [timeRange, setTimeRange] = useState<"month" | "prevMonth" | "all">("month");
+  const [otHours, setOtHours] = useState<number>(0);
+  const [leaveHours, setLeaveHours] = useState<number>(0);
   
   const [transitioning, setTransitioning] = useState(false);
   const [transitionStatus, setTransitionStatus] = useState("");
@@ -403,6 +406,34 @@ export default function Dashboard() {
     return s + Math.max(0, est - log);
   }, 0);
   const logPct = totalEstimated > 0 ? Math.round((totalLogged / totalEstimated) * 100) : 0;
+
+  // ── KPI Calculation ──
+  let workingDays = 0;
+  if (timeRange !== "all") {
+    const holidaysList = getHolidays();
+    let d = new Date(timeRange === "prevMonth" ? startOfPrevMonth : startOfMonth);
+    const end = timeRange === "prevMonth" ? endOfPrevMonth : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    
+    while (d <= end) {
+      const day = d.getDay();
+      if (day !== 0 && day !== 6) { // Not weekend
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const dt = String(d.getDate()).padStart(2, '0');
+        const dateStr = `${y}-${m}-${dt}`;
+        
+        if (!holidaysList.includes(dateStr)) {
+          workingDays++;
+        }
+      }
+      d.setDate(d.getDate() + 1);
+    }
+  }
+
+  const standardHours = workingDays * 7;
+  const actualHours = standardHours + otHours - leaveHours;
+  const closedLogWorkHours = totalLogged / 3600;
+  const kpiPercent = actualHours > 0 ? (closedLogWorkHours / actualHours) * 100 : 0;
 
   // ── Status & Type distribution ──
   const statusCounts: Record<string, number> = {};
@@ -844,6 +875,72 @@ export default function Dashboard() {
                 <span>🟦 Logged: {formatSeconds(totalLogged)}</span>
                 <span>⬜ Estimate: {formatSeconds(totalEstimated)}</span>
               </div>
+            </div>
+
+            {/* KPI Section */}
+            <div className="chart-card" style={{ marginBottom: 16 }}>
+              <div className="chart-title">📊 Đánh giá KPI</div>
+              <div className="chart-subtitle">
+                {timeRange === "all" ? "Vui lòng chọn Tháng này hoặc Tháng trước để tính KPI" : "KPI = (Giờ đã log cho task Closed / Số giờ thực tế) * 100"}
+              </div>
+              
+              {timeRange !== "all" && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 16 }}>
+                  {/* Cấu hình thời gian */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ width: 120, fontSize: 13, color: "var(--text-secondary)" }}>Số ngày chuẩn:</div>
+                      <div style={{ fontSize: 14, fontWeight: 600 }}>{workingDays} ngày</div>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>(Trừ T7, CN và Nghỉ lễ)</div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ width: 120, fontSize: 13, color: "var(--text-secondary)" }}>Giờ chuẩn (x7):</div>
+                      <div style={{ fontSize: 14, fontWeight: 600 }}>{standardHours}h</div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ width: 120, fontSize: 13, color: "var(--text-secondary)" }}>Số giờ OT:</div>
+                      <input 
+                        type="number" 
+                        min="0"
+                        value={otHours} 
+                        onChange={(e) => setOtHours(Number(e.target.value) || 0)}
+                        style={{ width: 80, padding: "4px 8px" }}
+                      />
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ width: 120, fontSize: 13, color: "var(--text-secondary)" }}>Số giờ Nghỉ:</div>
+                      <input 
+                        type="number" 
+                        min="0"
+                        value={leaveHours} 
+                        onChange={(e) => setLeaveHours(Number(e.target.value) || 0)}
+                        style={{ width: 80, padding: "4px 8px" }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Kết quả KPI */}
+                  <div style={{ background: "rgba(16, 185, 129, 0.05)", border: "1px solid rgba(16, 185, 129, 0.2)", borderRadius: 12, padding: "16px 20px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
+                      <span style={{ color: "var(--text-secondary)" }}>Số giờ thực tế (Yêu cầu):</span>
+                      <span style={{ fontWeight: 600 }}>{actualHours}h</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, fontSize: 13 }}>
+                      <span style={{ color: "var(--text-secondary)" }}>Giờ Log Work (Closed):</span>
+                      <span style={{ fontWeight: 600 }}>{closedLogWorkHours.toFixed(1)}h</span>
+                    </div>
+                    
+                    <div style={{ borderTop: "1px solid rgba(16, 185, 129, 0.2)", margin: "8px 0" }}></div>
+                    
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>Chỉ số KPI:</span>
+                      <span style={{ fontSize: 28, fontWeight: 800, color: kpiPercent >= 100 ? "var(--accent-green)" : kpiPercent >= 80 ? "var(--accent-orange)" : "var(--accent-red)" }}>
+                        {kpiPercent.toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Weekly Statistics Section */}
