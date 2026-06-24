@@ -158,6 +158,26 @@ export default function Teams() {
   const [sprintTasksLoading, setSprintTasksLoading] = useState(false);
   const [showClosedSprints, setShowClosedSprints] = useState(false);
 
+  useEffect(() => {
+    if (activeTab === "sprints" && sprintProjectKey) {
+      setSprintsLoading(true);
+      getBoards(sprintProjectKey)
+        .then(async (boards) => {
+          setSprintBoards(boards);
+          if (boards.length > 0) {
+            setSprintBoardId(boards[0].id);
+            const sps = await getSprints(boards[0].id);
+            setSprintsList(sps);
+          } else {
+            setSprintBoardId("");
+            setSprintsList([]);
+          }
+        })
+        .catch(console.error)
+        .finally(() => setSprintsLoading(false));
+    }
+  }, [activeTab, sprintProjectKey]);
+
   // Modals for Sprints
   const [createSprintModalOpen, setCreateSprintModalOpen] = useState(false);
   const [createSprintForm, setCreateSprintForm] = useState({ name: "", startDate: "", endDate: "", goal: "" });
@@ -1797,27 +1817,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                 <label>Dự án</label>
                 <select
                   value={sprintProjectKey}
-                  onChange={async (e) => {
-                    const key = e.target.value;
-                    setSprintProjectKey(key);
-                    setSprintBoards([]);
-                    setSprintsList([]);
-                    setSprintBoardId("");
-                    try {
-                      setSprintsLoading(true);
-                      const boards = await getBoards(key);
-                      setSprintBoards(boards);
-                      if (boards.length > 0) {
-                        setSprintBoardId(boards[0].id);
-                        const sps = await getSprints(boards[0].id);
-                        setSprintsList(sps);
-                      }
-                    } catch (err) {
-                      console.error(err);
-                    } finally {
-                      setSprintsLoading(false);
-                    }
-                  }}
+                  onChange={(e) => setSprintProjectKey(e.target.value)}
                 >
                   {JIRA_PROJECTS.map(p => <option key={p.key} value={p.key}>{p.name} ({p.key})</option>)}
                 </select>
