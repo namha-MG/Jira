@@ -114,7 +114,7 @@ export default function Teams() {
   // ── Tab 4: Team tasks ─────────────────────────────────────────────────────
   const [taskTeamId, setTaskTeamId] = useState<number | null>(null);
   const [taskMembers, setTaskMembers] = useState<TeamMember[]>([]);
-  const [taskProjects, setTaskProjects] = useState<string[]>([JIRA_PROJECTS[0].key]);
+  const [taskProjects, setTaskProjects] = useState<string[]>([localStorage.getItem("default_project") || JIRA_PROJECTS[0].key]);
   const [taskStatusFilter, setTaskStatusFilter] = useState("all");
   const [taskMemberFilter, setTaskMemberFilter] = useState("all");
   const [taskDateFrom, setTaskDateFrom] = useState(() => {
@@ -147,7 +147,7 @@ export default function Teams() {
   const [changeAssigneeLogs, setChangeAssigneeLogs] = useState<{ issueKey: string; status: "pending" | "success" | "error"; error?: string }[]>([]);
 
   // ── Tab 6: Sprints ────────────────────────────────────────────────────────
-  const [sprintProjectKey, setSprintProjectKey] = useState(JIRA_PROJECTS[0].key);
+  const [sprintProjectKey, setSprintProjectKey] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
   const [sprintBoards, setSprintBoards] = useState<any[]>([]);
   const [sprintBoardId, setSprintBoardId] = useState<number | "">("");
   const [sprintsList, setSprintsList] = useState<JiraSprint[]>([]);
@@ -170,7 +170,7 @@ export default function Teams() {
   // ── Tab 5: Statistics ─────────────────────────────────────────────────────
   const [statTeamId, setStatTeamId] = useState<number | null>(null);
   const [statMembers, setStatMembers] = useState<TeamMember[]>([]);
-  const [statProjects, setStatProjects] = useState<string[]>([JIRA_PROJECTS[0].key]);
+  const [statProjects, setStatProjects] = useState<string[]>([localStorage.getItem("default_project") || JIRA_PROJECTS[0].key]);
   const [statStatusFilter, setStatStatusFilter] = useState("all");
   const [statMemberFilter, setStatMemberFilter] = useState("all");
   const [statDateFrom, setStatDateFrom] = useState(() => {

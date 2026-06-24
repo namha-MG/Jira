@@ -1,17 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useSyncExternalStore } from "react";
 import * as XLSX from "xlsx";
-import { createIssue, createSubTask, addWorklog, JiraIssue, JiraUser, getLatestTaskDate, getAssignableUsers, getAllIssuesByJql } from "../jiraService";
+import { createIssue, createSubTask, addWorklog, JiraIssue, JiraUser, getLatestTaskDate, getAssignableUsers, getAllIssuesByJql, getBoards, getSprints, moveIssuesToSprint, JiraSprint } from "../jiraService";
 import UserSelect from "../components/UserSelect";
 import { JIRA_PROJECTS } from "../config";
 import { copyToClipboard } from "../utils";
-
-interface CreationLog {
-  summary: string;
-  status: "pending" | "processing" | "success" | "error";
-  key?: string;
-  errorMsg?: string;
-  logDateText?: string;
-}
+import { bulkCreateStore, CreationLog } from "../stores/bulkCreateStore";
 
 const parseExcelDate = (val: any): Date | null => {
   if (!val) return null;
@@ -38,7 +31,7 @@ const parseExcelDate = (val: any): Date | null => {
 };
 
 export default function BulkCreate() {
-  const [selectedProject, setSelectedProject] = useState(JIRA_PROJECTS[0].key);
+  const [selectedProject, setSelectedProject] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
   const [bulkText, setBulkText] = useState("");
   const [assignee, setAssignee] = useState("");
   const [estimate] = useState("7h"); // Cố định 7h theo yêu cầu thủ công
@@ -47,9 +40,37 @@ export default function BulkCreate() {
     const now = new Date();
     return now.toISOString().slice(0, 10);
   });
-  const [logs, setLogs] = useState<CreationLog[]>([]);
-  const [isRunning, setIsRunning] = useState(false);
   
+  const logs = useSyncExternalStore(bulkCreateStore.subscribe, bulkCreateStore.getLogs);
+  const isRunning = useSyncExternalStore(bulkCreateStore.subscribe, bulkCreateStore.getIsRunning);
+  const setLogs = bulkCreateStore.setLogs;
+  const setIsRunning = bulkCreateStore.setIsRunning;
+
+  const [availableSprints, setAvailableSprints] = useState<JiraSprint[]>([]);
+  const [selectedSprint, setSelectedSprint] = useState<string>("");
+
+  useEffect(() => {
+    localStorage.setItem("default_project", selectedProject);
+    const fetchSprints = async () => {
+      try {
+        const boards = await getBoards(selectedProject);
+        let allSprints: JiraSprint[] = [];
+        for (const b of boards) {
+          try {
+            const sps = await getSprints(b.id, "active,future");
+            const mappedSps = sps.map(s => ({ ...s, name: `${s.name} (${b.name})` }));
+            allSprints = [...allSprints, ...mappedSps];
+          } catch (e) {}
+        }
+        const uniqueSprints = Array.from(new Map(allSprints.map(s => [s.id, s])).values());
+        setAvailableSprints(uniqueSprints);
+      } catch (err) {
+        console.warn("Lỗi tải Sprints", err);
+      }
+    };
+    fetchSprints();
+  }, [selectedProject]);
+
   const [creationMode, setCreationMode] = useState<"manual" | "ai" | "excel">("manual");
   const [aiContext, setAiContext] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -160,6 +181,7 @@ export default function BulkCreate() {
   const handleExcelSubmit = async () => {
     if (excelData.length === 0) return;
     setIsRunning(true);
+    let createdKeys: string[] = [];
 
     const BA_TEMPLATES = [
       "[BA] Nghiên cứu & phân tích nghiệp vụ",
@@ -237,6 +259,7 @@ export default function BulkCreate() {
         }
 
         setLogs(prev => prev.map((l, idx) => idx === logIndex ? { ...l, status: "success", key: created.key } : l));
+        createdKeys.push(created.key);
 
         const parentKey = created.key;
         
@@ -352,6 +375,7 @@ export default function BulkCreate() {
                 }
 
                 setLogs(prev => prev.map((l, idx) => idx === targetIndex ? { ...l, status: "success", key: sCreated.key } : l));
+                createdKeys.push(sCreated.key);
              } catch (e: any) {
                 setLogs(prev => prev.map((l, idx) => idx === targetIndex ? { ...l, status: "error", errorMsg: "Lỗi tạo sub-task" } : l));
              }
@@ -365,6 +389,14 @@ export default function BulkCreate() {
       }
     }
     
+    if (selectedSprint && createdKeys.length > 0) {
+      try {
+        await moveIssuesToSprint(Number(selectedSprint), createdKeys);
+      } catch (err) {
+        console.warn("Lỗi gán sprint", err);
+      }
+    }
+
     setIsRunning(false);
   };
 
@@ -382,6 +414,8 @@ export default function BulkCreate() {
     if (summaries.length === 0) return;
 
     setIsRunning(true);
+    let createdKeys: string[] = [];
+
     const initialLogs = summaries.map((s) => ({
       summary: s.summary,
       status: "pending" as const,
@@ -485,6 +519,7 @@ export default function BulkCreate() {
             idx === i ? { ...log, status: "success", key: createdKey } : log
           )
         );
+        createdKeys.push(createdKey);
       } catch (err: unknown) {
         const e = err as { response?: { data?: { errorMessages?: string[] } }; message?: string };
         const msg = e.response?.data?.errorMessages?.[0] || e.message || "Lỗi tạo issue";
@@ -495,6 +530,15 @@ export default function BulkCreate() {
         );
       }
     }
+
+    if (selectedSprint && createdKeys.length > 0) {
+      try {
+        await moveIssuesToSprint(Number(selectedSprint), createdKeys);
+      } catch (err) {
+        console.warn("Lỗi gán sprint", err);
+      }
+    }
+
     setIsRunning(false);
     if (!tasksToCreate) {
       setBulkText("");
@@ -622,6 +666,22 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                     {JIRA_PROJECTS.map((p) => (
                       <option key={p.key} value={p.key}>
                         {p.name} ({p.key})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>Chọn Sprint</label>
+                  <select
+                    value={selectedSprint}
+                    onChange={(e) => setSelectedSprint(e.target.value)}
+                    disabled={isAnalyzing}
+                  >
+                    <option value="">-- Backlog (Không thêm vào Sprint) --</option>
+                    {availableSprints.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
                       </option>
                     ))}
                   </select>
@@ -806,6 +866,22 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                   </select>
                 </div>
 
+                <div className="form-group" style={{ marginTop: 16 }}>
+                  <label>Chọn Sprint</label>
+                  <select
+                    value={selectedSprint}
+                    onChange={(e) => setSelectedSprint(e.target.value)}
+                    disabled={isRunning}
+                  >
+                    <option value="">-- Backlog (Không thêm vào Sprint) --</option>
+                    {availableSprints.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                  <div className="form-group" style={{ marginTop: 16 }}>
                     <label>File Excel (.xlsx)</label>
                     <input type="file" accept=".xlsx, .xls" onChange={handleExcelUpload} disabled={isRunning} style={{ padding: "8px 0" }} />
@@ -902,6 +978,22 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                       {JIRA_PROJECTS.map((p) => (
                         <option key={p.key} value={p.key}>
                           {p.name} ({p.key})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Chọn Sprint</label>
+                    <select
+                      value={selectedSprint}
+                      onChange={(e) => setSelectedSprint(e.target.value)}
+                      disabled={isRunning}
+                    >
+                      <option value="">-- Backlog (Không thêm vào Sprint) --</option>
+                      {availableSprints.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
                         </option>
                       ))}
                     </select>

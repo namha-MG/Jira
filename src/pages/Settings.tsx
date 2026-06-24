@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { testConnection, JiraUser } from "../jiraService";
-import { JIRA_BASE_URL, msalConfig } from "../config";
+import { JIRA_BASE_URL, msalConfig, JIRA_PROJECTS } from "../config";
 
 interface Toast { id: number; type: "success" | "error" | "info"; msg: string; }
 
@@ -8,6 +8,7 @@ export default function Settings() {
   const [pat, setPat] = useState(() => localStorage.getItem("jira_pat") || "");
   const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
   const [jiraUrl, setJiraUrl] = useState(() => localStorage.getItem("jira_url") || JIRA_BASE_URL);
+  const [defaultProject, setDefaultProject] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
   const [testing, setTesting] = useState(false);
   const [connStatus, setConnStatus] = useState<null | { ok: boolean; user?: JiraUser; msg?: string }>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -61,6 +62,7 @@ export default function Settings() {
       localStorage.removeItem("gemini_api_key");
     }
     localStorage.setItem("jira_url", jiraUrl.trim() || JIRA_BASE_URL);
+    localStorage.setItem("default_project", defaultProject);
 
     // Test connection
     await testConn();
@@ -121,6 +123,21 @@ export default function Settings() {
                 onChange={(e) => setJiraUrl(e.target.value)}
                 placeholder="https://jira.example.com"
               />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="select-default-project">Dự án mặc định</label>
+              <select
+                id="select-default-project"
+                value={defaultProject}
+                onChange={(e) => setDefaultProject(e.target.value)}
+              >
+                {JIRA_PROJECTS.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.name} ({p.key})
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="form-group">

@@ -12,7 +12,7 @@ function getBadgeClass(statusName: string = "") {
 }
 
 export default function UnassignedIssues() {
-  const [selectedProject, setSelectedProject] = useState(JIRA_PROJECTS[0].key);
+  const [selectedProject, setSelectedProject] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
   const [issues, setIssues] = useState<JiraIssue[]>([]);
   const [loading, setLoading] = useState(true);
   const [dateFrom, setDateFrom] = useState(() => {

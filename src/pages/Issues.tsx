@@ -25,7 +25,7 @@ function getProgressClass(pct: number): string {
 }
 
 export default function Issues() {
-  const [selectedProject, setSelectedProject] = useState(JIRA_PROJECTS[0].key);
+  const [selectedProject, setSelectedProject] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
   const [issues, setIssues] = useState<JiraIssue[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
