@@ -59,7 +59,7 @@ export default function Dashboard() {
   const [timeRange, setTimeRange] = useState<"month" | "prevMonth" | "all">("month");
   const [otHours, setOtHours] = useState<number>(0);
   const [leaveHours, setLeaveHours] = useState<number>(0);
-  
+
   const [transitioning, setTransitioning] = useState(false);
   const [transitionStatus, setTransitionStatus] = useState("");
   const [showCloseModal, setShowCloseModal] = useState(false);
@@ -93,7 +93,7 @@ export default function Dashboard() {
         statusName.includes("hủy") ||
         statusName.includes("đóng");
 
-      const isResolved = 
+      const isResolved =
         statusName.includes("resolve") ||
         statusName.includes("done") ||
         statusName.includes("hoàn thành") ||
@@ -118,10 +118,10 @@ export default function Dashboard() {
   const executeAutoClose = async () => {
     if (selectedTargets.size === 0) return;
     setShowCloseModal(false);
-    
+
     setTransitioning(true);
     let successCount = 0;
-    
+
     const targetsToClose = closableTargets.filter(t => selectedTargets.has(t.key));
 
     for (const task of targetsToClose) {
@@ -140,8 +140,8 @@ export default function Dashboard() {
 
         if (!isAlreadyResolved && !isAlreadyClosed) {
           // 1. Chuyển sang In Progress (nếu có)
-          const toInProgress = transitions.find(t => 
-            inprogressKeywords.includes(t.to.name.toLowerCase()) || 
+          const toInProgress = transitions.find(t =>
+            inprogressKeywords.includes(t.to.name.toLowerCase()) ||
             inprogressKeywords.some(kw => t.name.toLowerCase().includes(kw))
           );
           if (toInProgress) {
@@ -159,8 +159,8 @@ export default function Dashboard() {
           };
 
           // 2. Chuyển sang Resolved/Hoàn thành
-          const toResolved = transitions.find(t => 
-            resolvedKeywords.includes(t.to.name.toLowerCase()) || 
+          const toResolved = transitions.find(t =>
+            resolvedKeywords.includes(t.to.name.toLowerCase()) ||
             resolvedKeywords.some(kw => t.name.toLowerCase().includes(kw))
           );
           if (toResolved) {
@@ -169,8 +169,8 @@ export default function Dashboard() {
             const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
             const transitionFields: any = { resolution: { id: "10000" } };
             if (outputField) {
-               const aiOutput = await generateAiOutput(task.fields.summary);
-               transitionFields[outputField.id] = aiOutput;
+              const aiOutput = await generateAiOutput(task.fields.summary);
+              transitionFields[outputField.id] = aiOutput;
             }
 
             try {
@@ -206,8 +206,8 @@ export default function Dashboard() {
         }
 
         // 3. Chuyển sang Closed/Đóng
-        const toClosed = transitions.find(t => 
-          closedKeywords.includes(t.to.name.toLowerCase()) || 
+        const toClosed = transitions.find(t =>
+          closedKeywords.includes(t.to.name.toLowerCase()) ||
           closedKeywords.some(kw => t.name.toLowerCase().includes(kw))
         );
         if (toClosed) {
@@ -216,8 +216,8 @@ export default function Dashboard() {
           const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
           const transitionFields: any = { resolution: { id: "10000" } };
           if (outputField) {
-             const aiOutput = await generateAiOutput(task.fields.summary);
-             transitionFields[outputField.id] = aiOutput;
+            const aiOutput = await generateAiOutput(task.fields.summary);
+            transitionFields[outputField.id] = aiOutput;
           }
 
           try {
@@ -228,7 +228,7 @@ export default function Dashboard() {
             if (data?.errorMessages?.length) msg = data.errorMessages[0];
             else if (data?.errors) msg = JSON.stringify(data.errors);
             console.warn(`Chuyển sang Closed với fields thất bại cho ${key}, thử lại không dùng fields. Lỗi: ${msg}`);
-            
+
             try {
               await transitionIssue(key, toClosed.id);
             } catch (innerE: any) {
@@ -236,7 +236,7 @@ export default function Dashboard() {
               let innerMsg = innerE.message;
               if (innerData?.errorMessages?.length) innerMsg = innerData.errorMessages[0];
               else if (innerData?.errors) innerMsg = JSON.stringify(innerData.errors);
-              
+
               alert(`Không thể chuyển ${key} sang Closed. Lỗi Jira: ${innerMsg}`);
               throw innerE;
             }
@@ -265,22 +265,22 @@ export default function Dashboard() {
       alert("Vui lòng nhập nội dung comment hoặc chọn ảnh.");
       return;
     }
-    
+
     setIsSubmittingComment(true);
     try {
       let finalCommentText = commentText;
-      
+
       if (commentFile) {
         // Upload file first
         const uploadRes = await uploadAttachment(commentIssueKey, commentFile);
-        const filename = uploadRes && uploadRes.length > 0 && uploadRes[0].filename 
-                         ? uploadRes[0].filename 
-                         : commentFile.name;
-        
+        const filename = uploadRes && uploadRes.length > 0 && uploadRes[0].filename
+          ? uploadRes[0].filename
+          : commentFile.name;
+
         // Append image reference using Jira markup
         finalCommentText += `\n\n!${filename}!`;
       }
-      
+
       await addComment(commentIssueKey, finalCommentText);
       alert("Đã thêm comment thành công!");
       setCommentIssueKey(null);
@@ -335,7 +335,7 @@ export default function Dashboard() {
     }
 
     if (timeRange === "all") return true;
-    
+
     let rangeStart = startOfMonth;
     let rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     if (timeRange === "prevMonth") {
@@ -363,7 +363,7 @@ export default function Dashboard() {
     if (hasParent) return s;
     return s + getIssueEstimatedSeconds(i);
   }, 0);
-  
+
   // Tính tổng thời gian đã log: chỉ tính những ticket đã được closed
   const totalLogged = filteredIssues.reduce((sum, issue) => {
     const statusName = issue.fields.status?.name?.toLowerCase() || "";
@@ -413,7 +413,7 @@ export default function Dashboard() {
     const holidaysList = getHolidays();
     let d = new Date(timeRange === "prevMonth" ? startOfPrevMonth : startOfMonth);
     const end = timeRange === "prevMonth" ? endOfPrevMonth : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-    
+
     while (d <= end) {
       const day = d.getDay();
       if (day !== 0 && day !== 6) { // Not weekend
@@ -421,7 +421,7 @@ export default function Dashboard() {
         const m = String(d.getMonth() + 1).padStart(2, '0');
         const dt = String(d.getDate()).padStart(2, '0');
         const dateStr = `${y}-${m}-${dt}`;
-        
+
         if (!holidaysList.includes(dateStr)) {
           workingDays++;
         }
@@ -433,7 +433,7 @@ export default function Dashboard() {
   const standardHours = workingDays * 7;
   const actualHours = standardHours + otHours - leaveHours;
   const closedLogWorkHours = totalLogged / 3600;
-  const kpiPercent = actualHours > 0 ? (closedLogWorkHours / actualHours) * 100 : 0;
+  const kpiPercent = closedLogWorkHours > 0 ? (actualHours / closedLogWorkHours) : 0;
 
   // ── Status & Type distribution ──
   const statusCounts: Record<string, number> = {};
@@ -459,7 +459,7 @@ export default function Dashboard() {
   // ── Per-project bar chart ──
   const projectStats: ProjectStat[] = JIRA_PROJECTS.map((p) => {
     const projIssues = filteredIssues.filter((i) => i.fields.project.key === p.key);
-    
+
     const loggedSeconds = projIssues.reduce((sum, issue) => {
       if (timeRange === "all") {
         return sum + (issue.fields.timetracking?.timeSpentSeconds || 0);
@@ -493,8 +493,8 @@ export default function Dashboard() {
   const barChartData = projectStats.map((p) => ({
     name: p.projectName,
     "Estimate (h)": Math.round(p.estimatedSeconds / 3600),
-    "Logged (h)":   Math.round(p.loggedSeconds / 3600),
-    "Remaining (h)":Math.round(p.remainingSeconds / 3600),
+    "Logged (h)": Math.round(p.loggedSeconds / 3600),
+    "Remaining (h)": Math.round(p.remainingSeconds / 3600),
   }));
 
   // ── Weekly statistics logic ──
@@ -508,7 +508,7 @@ export default function Dashboard() {
   };
 
   const currentMonday = getStartOfWeek(new Date());
-  
+
   const lastMonday = new Date(currentMonday);
   lastMonday.setDate(lastMonday.getDate() - 7);
 
@@ -588,7 +588,7 @@ export default function Dashboard() {
             <p className="empty-state-text">
               Vào <strong>Cài đặt</strong> để nhập Jira Personal Access Token và kết nối với server Jira của bạn.
             </p>
-            <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={() => {}}>
+            <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={() => { }}>
               ⚙️ Vào Cài đặt
             </button>
           </div>
@@ -641,9 +641,9 @@ export default function Dashboard() {
             className="btn btn-sm"
             onClick={autoCloseLoggedTasks}
             disabled={loading || transitioning}
-            style={{ 
-              background: "linear-gradient(135deg, #8b5cf6, #4f8ef7)", 
-              color: "white", 
+            style={{
+              background: "linear-gradient(135deg, #8b5cf6, #4f8ef7)",
+              color: "white",
               border: "none",
               fontWeight: 500,
               padding: "6px 14px",
@@ -698,8 +698,8 @@ export default function Dashboard() {
               <div style={{ padding: 20, overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
                 {closableTargets.map(t => (
                   <label key={t.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer" }}>
-                    <input 
-                      type="checkbox" 
+                    <input
+                      type="checkbox"
                       style={{ width: 18, height: 18, cursor: "pointer" }}
                       checked={selectedTargets.has(t.key)}
                       onChange={(e) => {
@@ -723,8 +723,8 @@ export default function Dashboard() {
               </div>
               <div style={{ padding: 20, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)" }}>
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     checked={selectedTargets.size === closableTargets.length}
                     onChange={(e) => {
                       if (e.target.checked) setSelectedTargets(new Set(closableTargets.map(t => t.key)));
@@ -755,7 +755,7 @@ export default function Dashboard() {
               <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
                 <div className="form-group">
                   <label>Nội dung Comment</label>
-                  <textarea 
+                  <textarea
                     value={commentText}
                     onChange={(e) => setCommentText(e.target.value)}
                     rows={4}
@@ -765,8 +765,8 @@ export default function Dashboard() {
                 </div>
                 <div className="form-group">
                   <label>Đính kèm ảnh (Tùy chọn)</label>
-                  <input 
-                    type="file" 
+                  <input
+                    type="file"
                     accept="image/*"
                     onChange={(e) => {
                       if (e.target.files && e.target.files.length > 0) {
@@ -792,7 +792,7 @@ export default function Dashboard() {
         {loading ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div className="stats-grid">
-              {[1,2,3,4].map(i => (
+              {[1, 2, 3, 4].map(i => (
                 <div key={i} className="stat-card" style={{ height: 110 }}>
                   <div className="skeleton" style={{ height: 24, width: "60%", marginBottom: 12 }} />
                   <div className="skeleton" style={{ height: 36, width: "40%" }} />
@@ -881,9 +881,9 @@ export default function Dashboard() {
             <div className="chart-card" style={{ marginBottom: 16 }}>
               <div className="chart-title">📊 Đánh giá KPI</div>
               <div className="chart-subtitle">
-                {timeRange === "all" ? "Vui lòng chọn Tháng này hoặc Tháng trước để tính KPI" : "KPI = (Giờ đã log cho task Closed / Số giờ thực tế) * 100"}
+                {timeRange === "all" ? "Vui lòng chọn Tháng này hoặc Tháng trước để tính KPI" : "KPI = Số giờ thực tế / Giờ đã log cho task Closed"}
               </div>
-              
+
               {timeRange !== "all" && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 16 }}>
                   {/* Cấu hình thời gian */}
@@ -899,20 +899,20 @@ export default function Dashboard() {
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                       <div style={{ width: 120, fontSize: 13, color: "var(--text-secondary)" }}>Số giờ OT:</div>
-                      <input 
-                        type="number" 
+                      <input
+                        type="number"
                         min="0"
-                        value={otHours} 
+                        value={otHours}
                         onChange={(e) => setOtHours(Number(e.target.value) || 0)}
                         style={{ width: 80, padding: "4px 8px" }}
                       />
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                       <div style={{ width: 120, fontSize: 13, color: "var(--text-secondary)" }}>Số giờ Nghỉ:</div>
-                      <input 
-                        type="number" 
+                      <input
+                        type="number"
                         min="0"
-                        value={leaveHours} 
+                        value={leaveHours}
                         onChange={(e) => setLeaveHours(Number(e.target.value) || 0)}
                         style={{ width: 80, padding: "4px 8px" }}
                       />
@@ -929,13 +929,13 @@ export default function Dashboard() {
                       <span style={{ color: "var(--text-secondary)" }}>Giờ Log Work (Closed):</span>
                       <span style={{ fontWeight: 600 }}>{closedLogWorkHours.toFixed(1)}h</span>
                     </div>
-                    
+
                     <div style={{ borderTop: "1px solid rgba(16, 185, 129, 0.2)", margin: "8px 0" }}></div>
-                    
+
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
                       <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>Chỉ số KPI:</span>
-                      <span style={{ fontSize: 28, fontWeight: 800, color: kpiPercent >= 100 ? "var(--accent-green)" : kpiPercent >= 80 ? "var(--accent-orange)" : "var(--accent-red)" }}>
-                        {kpiPercent.toFixed(1)}%
+                      <span style={{ fontSize: 28, fontWeight: 800, color: kpiPercent === 0 ? "var(--text-secondary)" : kpiPercent <= 1 ? "var(--accent-green)" : "var(--accent-red)" }}>
+                        {kpiPercent.toFixed(2)}
                       </span>
                     </div>
                   </div>
@@ -960,7 +960,7 @@ export default function Dashboard() {
                         itemStyle={{ color: "#f1f5f9" }}
                         labelStyle={{ color: "#f1f5f9", fontWeight: 600 }}
                       />
-                      <Bar dataKey="Giờ đã log (h)" fill="#10b981" radius={[4,4,0,0]} barSize={24} />
+                      <Bar dataKey="Giờ đã log (h)" fill="#10b981" radius={[4, 4, 0, 0]} barSize={24} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -996,12 +996,12 @@ export default function Dashboard() {
                 </div>
 
                 {/* Progress message / Micro action */}
-                <div style={{ 
-                  background: "var(--bg-card)", 
-                  border: "1px solid var(--border)", 
-                  borderRadius: 12, 
-                  padding: "12px 14px", 
-                  fontSize: 12, 
+                <div style={{
+                  background: "var(--bg-card)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 12,
+                  padding: "12px 14px",
+                  fontSize: 12,
                   color: "var(--text-secondary)",
                   display: "flex",
                   alignItems: "center",
@@ -1040,9 +1040,9 @@ export default function Dashboard() {
                       labelStyle={{ color: "#f1f5f9", fontWeight: 600 }}
                     />
                     <Legend iconType="circle" wrapperStyle={{ fontSize: 11, color: "#94a3b8" }} />
-                    <Bar dataKey="Estimate (h)" fill="#4f8ef7" radius={[4,4,0,0]} />
-                    <Bar dataKey="Logged (h)"   fill="#10b981" radius={[4,4,0,0]} />
-                    <Bar dataKey="Remaining (h)" fill="#f59e0b" radius={[4,4,0,0]} />
+                    <Bar dataKey="Estimate (h)" fill="#4f8ef7" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Logged (h)" fill="#10b981" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Remaining (h)" fill="#f59e0b" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -1147,14 +1147,14 @@ export default function Dashboard() {
                           <td style={{ padding: "8px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{formatSeconds(est)}</td>
                           <td style={{ padding: "8px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{formatSeconds(log)}</td>
                           <td style={{ padding: "8px", fontWeight: 600, whiteSpace: "nowrap" }}>
-                            <span style={{ 
-                              color: diff > 0 ? "var(--accent-red)" : diff < 0 ? "#f59e0b" : "var(--text-secondary)" 
+                            <span style={{
+                              color: diff > 0 ? "var(--accent-red)" : diff < 0 ? "#f59e0b" : "var(--text-secondary)"
                             }}>
                               {diff > 0 ? "+" : ""}{diffH.toFixed(1)}h
                             </span>
                           </td>
                           <td style={{ padding: "8px", textAlign: "center" }}>
-                            <span style={{ 
+                            <span style={{
                               color: pct > 100 ? "var(--accent-red)" : pct > 80 ? "#f59e0b" : "var(--accent-green)",
                               fontWeight: 600,
                               fontSize: 12
@@ -1239,8 +1239,8 @@ export default function Dashboard() {
                             ) : <span style={{ color: "var(--text-muted)", fontSize: 11 }}>—</span>}
                           </td>
                           <td style={{ textAlign: "center", width: 60 }}>
-                            <button 
-                              className="btn btn-ghost btn-sm" 
+                            <button
+                              className="btn btn-ghost btn-sm"
                               onClick={() => setCommentIssueKey(issue.key)}
                               title="Thêm Comment"
                               style={{ padding: "4px 8px", fontSize: 14 }}
