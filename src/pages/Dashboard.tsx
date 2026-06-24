@@ -409,6 +409,7 @@ export default function Dashboard() {
 
   // ── KPI Calculation ──
   let workingDays = 0;
+  let workingDaysToDate = 0;
   if (timeRange !== "all") {
     const holidaysList = getHolidays();
     let d = new Date(timeRange === "prevMonth" ? startOfPrevMonth : startOfMonth);
@@ -424,6 +425,13 @@ export default function Dashboard() {
 
         if (!holidaysList.includes(dateStr)) {
           workingDays++;
+          // Tính workingDaysToDate (nếu ngày d nhỏ hơn hoặc bằng ngày hiện tại)
+          // Để đảm bảo so sánh đúng ngày, ta reset giờ phút giây của "now"
+          const today = new Date();
+          today.setHours(23, 59, 59, 999);
+          if (d.getTime() <= today.getTime()) {
+            workingDaysToDate++;
+          }
         }
       }
       d.setDate(d.getDate() + 1);
@@ -433,7 +441,11 @@ export default function Dashboard() {
   const standardHours = workingDays * 7;
   const actualHours = standardHours + otHours - leaveHours;
   const closedLogWorkHours = totalLogged / 3600;
-  const kpiPercent = closedLogWorkHours > 0 ? (actualHours / closedLogWorkHours) : 0;
+  const kpiMonth = closedLogWorkHours > 0 ? (actualHours / closedLogWorkHours) : 0;
+
+  const standardHoursToDate = workingDaysToDate * 7;
+  const actualHoursToDate = standardHoursToDate + otHours - leaveHours;
+  const kpiToDate = closedLogWorkHours > 0 ? (actualHoursToDate / closedLogWorkHours) : 0;
 
   // ── Status & Type distribution ──
   const statusCounts: Record<string, number> = {};
@@ -920,24 +932,46 @@ export default function Dashboard() {
                   </div>
 
                   {/* Kết quả KPI */}
-                  <div style={{ background: "rgba(16, 185, 129, 0.05)", border: "1px solid rgba(16, 185, 129, 0.2)", borderRadius: 12, padding: "16px 20px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
-                      <span style={{ color: "var(--text-secondary)" }}>Số giờ thực tế (Yêu cầu):</span>
-                      <span style={{ fontWeight: 600 }}>{actualHours}h</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, fontSize: 13 }}>
-                      <span style={{ color: "var(--text-secondary)" }}>Giờ Log Work (Closed):</span>
-                      <span style={{ fontWeight: 600 }}>{closedLogWorkHours.toFixed(1)}h</span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    
+                    {/* KPI Đến Hiện Tại */}
+                    <div style={{ background: "rgba(79, 142, 247, 0.05)", border: "1px solid rgba(79, 142, 247, 0.2)", borderRadius: 12, padding: "16px 20px" }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: "var(--accent-blue-light)" }}>KPI Đến Ngày Hiện Tại</div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 13 }}>
+                        <span style={{ color: "var(--text-secondary)" }}>Số giờ thực tế (Đến hôm nay):</span>
+                        <span style={{ fontWeight: 600 }}>{actualHoursToDate}h</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
+                        <span style={{ color: "var(--text-secondary)" }}>Giờ Log Work (Closed):</span>
+                        <span style={{ fontWeight: 600 }}>{closedLogWorkHours.toFixed(1)}h</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, borderTop: "1px solid rgba(79, 142, 247, 0.2)", paddingTop: 8 }}>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>Chỉ số KPI:</span>
+                        <span style={{ fontSize: 24, fontWeight: 800, color: kpiToDate === 0 ? "var(--text-secondary)" : kpiToDate <= 1 ? "var(--accent-green)" : "var(--accent-red)" }}>
+                          {kpiToDate.toFixed(2)}
+                        </span>
+                      </div>
                     </div>
 
-                    <div style={{ borderTop: "1px solid rgba(16, 185, 129, 0.2)", margin: "8px 0" }}></div>
-
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-                      <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>Chỉ số KPI:</span>
-                      <span style={{ fontSize: 28, fontWeight: 800, color: kpiPercent === 0 ? "var(--text-secondary)" : kpiPercent <= 1 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                        {kpiPercent.toFixed(2)}
-                      </span>
+                    {/* KPI Cả Tháng */}
+                    <div style={{ background: "rgba(16, 185, 129, 0.05)", border: "1px solid rgba(16, 185, 129, 0.2)", borderRadius: 12, padding: "16px 20px" }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: "var(--accent-green)" }}>KPI Dự Kiến Cả Tháng</div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 13 }}>
+                        <span style={{ color: "var(--text-secondary)" }}>Số giờ thực tế (Cả tháng):</span>
+                        <span style={{ fontWeight: 600 }}>{actualHours}h</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
+                        <span style={{ color: "var(--text-secondary)" }}>Giờ Log Work (Closed):</span>
+                        <span style={{ fontWeight: 600 }}>{closedLogWorkHours.toFixed(1)}h</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, borderTop: "1px solid rgba(16, 185, 129, 0.2)", paddingTop: 8 }}>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>Chỉ số KPI:</span>
+                        <span style={{ fontSize: 24, fontWeight: 800, color: kpiMonth === 0 ? "var(--text-secondary)" : kpiMonth <= 1 ? "var(--accent-green)" : "var(--accent-red)" }}>
+                          {kpiMonth.toFixed(2)}
+                        </span>
+                      </div>
                     </div>
+
                   </div>
                 </div>
               )}
