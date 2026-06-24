@@ -442,10 +442,12 @@ export default function Dashboard() {
   const actualHours = standardHours + otHours - leaveHours;
   const closedLogWorkHours = totalLogged / 3600;
   const kpiMonth = closedLogWorkHours > 0 ? (actualHours / closedLogWorkHours) : 0;
+  const missingHoursMonth = Math.max(0, actualHours - closedLogWorkHours);
 
   const standardHoursToDate = workingDaysToDate * 7;
   const actualHoursToDate = standardHoursToDate + otHours - leaveHours;
   const kpiToDate = closedLogWorkHours > 0 ? (actualHoursToDate / closedLogWorkHours) : 0;
+  const missingHoursToDate = Math.max(0, actualHoursToDate - closedLogWorkHours);
 
   // ── Status & Type distribution ──
   const statusCounts: Record<string, number> = {};
@@ -945,6 +947,12 @@ export default function Dashboard() {
                         <span style={{ color: "var(--text-secondary)" }}>Giờ Log Work (Closed):</span>
                         <span style={{ fontWeight: 600 }}>{closedLogWorkHours.toFixed(1)}h</span>
                       </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
+                        <span style={{ color: "var(--text-secondary)" }}>Số giờ còn thiếu:</span>
+                        <span style={{ fontWeight: 600, color: missingHoursToDate > 0 ? "var(--accent-orange)" : "var(--accent-green)" }}>
+                          {missingHoursToDate.toFixed(1)}h
+                        </span>
+                      </div>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, borderTop: "1px solid rgba(79, 142, 247, 0.2)", paddingTop: 8 }}>
                         <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>Chỉ số KPI:</span>
                         <span style={{ fontSize: 24, fontWeight: 800, color: kpiToDate === 0 ? "var(--text-secondary)" : kpiToDate <= 1 ? "var(--accent-green)" : "var(--accent-red)" }}>
@@ -963,6 +971,12 @@ export default function Dashboard() {
                       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
                         <span style={{ color: "var(--text-secondary)" }}>Giờ Log Work (Closed):</span>
                         <span style={{ fontWeight: 600 }}>{closedLogWorkHours.toFixed(1)}h</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
+                        <span style={{ color: "var(--text-secondary)" }}>Số giờ còn thiếu:</span>
+                        <span style={{ fontWeight: 600, color: missingHoursMonth > 0 ? "var(--accent-orange)" : "var(--accent-green)" }}>
+                          {missingHoursMonth.toFixed(1)}h
+                        </span>
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, borderTop: "1px solid rgba(16, 185, 129, 0.2)", paddingTop: 8 }}>
                         <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>Chỉ số KPI:</span>
