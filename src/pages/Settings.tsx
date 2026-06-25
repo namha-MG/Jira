@@ -10,6 +10,7 @@ export default function Settings() {
   const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
   const [jiraUrl, setJiraUrl] = useState(() => localStorage.getItem("jira_url") || JIRA_BASE_URL);
   const [defaultProject, setDefaultProject] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
+  const [autoLogEnabled, setAutoLogEnabled] = useState(() => localStorage.getItem("auto_log_enabled") !== "false");
   const [holidays, setHolidays] = useState<string[]>([]);
   const [newHoliday, setNewHoliday] = useState("");
   const [testing, setTesting] = useState(false);
@@ -67,6 +68,7 @@ export default function Settings() {
     }
     localStorage.setItem("jira_url", jiraUrl.trim() || JIRA_BASE_URL);
     localStorage.setItem("default_project", defaultProject);
+    localStorage.setItem("auto_log_enabled", String(autoLogEnabled));
     saveHolidays(holidays);
 
     // Test connection
@@ -78,7 +80,7 @@ export default function Settings() {
         await fetch("/api/save-token", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pat: pat.trim() })
+          body: JSON.stringify({ pat: pat.trim(), autoLogEnabled })
         });
       } catch (e) {
         console.warn("Failed to sync PAT to backend", e);
@@ -236,6 +238,27 @@ export default function Settings() {
               >
                 🗑️ Xóa
               </button>
+            </div>
+          </div>
+
+          {/* Background Job Config */}
+          <div className="settings-section">
+            <div className="settings-section-title">⚙️ Tự động Log Work (Job ngầm)</div>
+            <div className="settings-section-desc">
+              Hệ thống sẽ chạy ngầm vào 08:00 và 17:00 hàng ngày để tự động log work và chuyển trạng thái các task đến Due Date. Bạn có thể tắt tính năng này nếu không muốn.
+            </div>
+            
+            <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", background: "var(--bg-card)", padding: "12px 16px", borderRadius: 8, border: "1px solid var(--border)" }}>
+              <input 
+                type="checkbox" 
+                checked={autoLogEnabled}
+                onChange={(e) => setAutoLogEnabled(e.target.checked)}
+                style={{ width: 18, height: 18, cursor: "pointer" }}
+              />
+              <span style={{ fontSize: 14, fontWeight: 500, color: "var(--text-primary)" }}>Bật Job tự động Log Work</span>
+            </label>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+              Chú ý: Nhớ bấm <strong style={{ color: "var(--text-primary)" }}>Lưu & Kết nối</strong> ở bên trên để lưu trạng thái!
             </div>
           </div>
 

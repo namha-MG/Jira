@@ -37,7 +37,7 @@ const { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } = process.env;
 const POSTGRES_URL = `postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}`;
 
 app.post("/api/save-token", async (req, res) => {
-  const { pat } = req.body;
+  const { pat, autoLogEnabled } = req.body;
   if (!pat) {
     return res.status(400).json({ error: "Missing pat" });
   }
@@ -52,6 +52,16 @@ app.post("/api/save-token", async (req, res) => {
       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = CURRENT_TIMESTAMP
     `;
     await client.query(query, [pat]);
+
+    if (autoLogEnabled !== undefined) {
+      const query2 = `
+        INSERT INTO jira_app_configs (key, value)
+        VALUES ('auto_log_enabled', $1)
+        ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = CURRENT_TIMESTAMP
+      `;
+      await client.query(query2, [String(autoLogEnabled)]);
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error("Error saving PAT:", err);

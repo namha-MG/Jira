@@ -44,6 +44,11 @@ async function processUser(pat: string, client: Client, runType: string = "CRON"
 
       if (isDone) continue;
 
+      if (!issue.fields.assignee) {
+        console.log(`[Auto] Bỏ qua task ${issue.key} vì chưa được assign`);
+        continue;
+      }
+
       const startDateStr = issue.fields.customfield_10300;
       const dueDateStr = issue.fields.duedate || issue.fields.customfield_10302;
       
@@ -189,9 +194,14 @@ export function startCronJobs() {
     const client = new Client({ connectionString: POSTGRES_URL });
     try {
       await client.connect();
-      const res = await client.query("SELECT key, value FROM jira_app_configs WHERE key IN ('jira_pat', 'gemini_api_key')");
+      const res = await client.query("SELECT key, value FROM jira_app_configs WHERE key IN ('jira_pat', 'gemini_api_key', 'auto_log_enabled')");
       const configMap: any = res.rows.reduce((acc: any, row) => ({ ...acc, [row.key]: row.value }), {});
       
+      if (configMap.auto_log_enabled === 'false') {
+        console.log("Auto log work is disabled. Skipping execution.");
+        return;
+      }
+
       if (configMap.jira_pat) {
         await processUser(configMap.jira_pat, client, "CRON", configMap.gemini_api_key);
       } else {
@@ -212,9 +222,13 @@ export async function triggerManualJob() {
   const client = new Client({ connectionString: POSTGRES_URL });
   try {
     await client.connect();
-    const res = await client.query("SELECT key, value FROM jira_app_configs WHERE key IN ('jira_pat', 'gemini_api_key')");
+    const res = await client.query("SELECT key, value FROM jira_app_configs WHERE key IN ('jira_pat', 'gemini_api_key', 'auto_log_enabled')");
     const configMap: any = res.rows.reduce((acc: any, row) => ({ ...acc, [row.key]: row.value }), {});
       
+    if (configMap.auto_log_enabled === 'false') {
+      throw new Error("Job tự động log work đang bị tắt trong cài đặt.");
+    }
+
     if (configMap.jira_pat) {
       await processUser(configMap.jira_pat, client, "MANUAL", configMap.gemini_api_key);
     } else {
