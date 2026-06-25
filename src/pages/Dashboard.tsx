@@ -57,8 +57,20 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [timeRange, setTimeRange] = useState<"month" | "prevMonth" | "all">("month");
-  const [otHours, setOtHours] = useState<number>(0);
-  const [leaveHours, setLeaveHours] = useState<number>(0);
+  const [otHours, setOtHours] = useState<number>(() => Number(localStorage.getItem("dashboard_ot")) || 0);
+  const [leaveHours, setLeaveHours] = useState<number>(() => Number(localStorage.getItem("dashboard_leave")) || 0);
+  const [detailedConfig, setDetailedConfig] = useState<Record<string, { ot: number, leave: number }>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("dashboard_detailed_config") || "{}");
+    } catch {
+      return {};
+    }
+  });
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [tempDetailedConfig, setTempDetailedConfig] = useState<Record<string, { ot: number, leave: number }>>({});
+  
+  const [suggestionText, setSuggestionText] = useState("");
+  const [isGeneratingSuggestion, setIsGeneratingSuggestion] = useState(false);
 
   const [transitioning, setTransitioning] = useState(false);
   const [transitionStatus, setTransitionStatus] = useState("");
@@ -72,6 +84,13 @@ export default function Dashboard() {
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
+
+  const saveConfig = () => {
+    localStorage.setItem("dashboard_ot", String(otHours));
+    localStorage.setItem("dashboard_leave", String(leaveHours));
+    localStorage.setItem("dashboard_detailed_config", JSON.stringify(detailedConfig));
+    alert("Đã lưu cấu hình OT/Nghỉ thành công!");
+  };
 
   const autoCloseLoggedTasks = () => {
     // Tìm các task có:
@@ -523,13 +542,117 @@ export default function Dashboard() {
 
   const currentMonday = getStartOfWeek(new Date());
 
+  const dayNames = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ Nhật"];
+
+  const getDaysInView = useCallback(() => {
+    const days: any[] = [];
+    let start = startOfMonth;
+    let end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    if (timeRange === "prevMonth") {
+      start = startOfPrevMonth;
+      end = endOfPrevMonth;
+    }
+    const holidaysList = getHolidays();
+    let d = new Date(start);
+    while (d <= end) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const dt = String(d.getDate()).padStart(2, '0');
+      const dateStr = `${y}-${m}-${dt}`;
+      
+      const day = d.getDay();
+      const isWeekend = day === 0 || day === 6;
+      const isHoliday = holidaysList.includes(dateStr);
+      
+      days.push({
+         dateStr,
+         isWeekend,
+         isHoliday,
+         dayOfWeek: dayNames[day === 0 ? 6 : day - 1]
+      });
+      d.setDate(d.getDate() + 1);
+    }
+    return days;
+  }, [timeRange, startOfMonth, startOfPrevMonth, endOfPrevMonth]);
+
+  const dailyLoggedMap: Record<string, number> = {};
+  filteredIssues.forEach(issue => {
+    const taskDateStr = issue.fields.customfield_10300 || issue.fields.duedate || issue.fields.customfield_10302;
+    issue.fields.worklog?.worklogs?.forEach((wl) => {
+      const wlDate = taskDateStr ? new Date(taskDateStr) : new Date(wl.started);
+      const y = wlDate.getFullYear();
+      const m = String(wlDate.getMonth() + 1).padStart(2, '0');
+      const dt = String(wlDate.getDate()).padStart(2, '0');
+      const dateStr = `${y}-${m}-${dt}`;
+      dailyLoggedMap[dateStr] = (dailyLoggedMap[dateStr] || 0) + wl.timeSpentSeconds;
+    });
+  });
+
+  const detailedOtSum = Object.values(detailedConfig).reduce((sum, c) => sum + (c.ot || 0), 0);
+  const detailedLeaveSum = Object.values(detailedConfig).reduce((sum, c) => sum + (c.leave || 0), 0);
+  const configMatches = detailedOtSum === otHours && detailedLeaveSum === leaveHours && Object.keys(detailedConfig).length > 0;
+
+  const handleGenerateSuggestion = async () => {
+    if (configMatches) {
+      const missingDays = [];
+      const days = getDaysInView();
+      for (const d of days) {
+        const logH = (dailyLoggedMap[d.dateStr] || 0) / 3600;
+        const targetH = (d.isWeekend || d.isHoliday ? 0 : 7) + (detailedConfig[d.dateStr]?.ot || 0) - (detailedConfig[d.dateStr]?.leave || 0);
+        if (logH < targetH) {
+          missingDays.push(`- ${d.dateStr}: Cần ${targetH}h, Đã log ${logH.toFixed(1)}h ➔ Thiếu ${(targetH - logH).toFixed(1)}h`);
+        }
+      }
+      if (missingDays.length > 0) {
+        setSuggestionText(`Bạn đang log thiếu giờ ở các ngày sau (theo cấu hình chi tiết):\n${missingDays.join("\n")}`);
+      } else {
+        setSuggestionText("✅ Không phát hiện ngày nào log thiếu giờ so với cấu hình chi tiết.");
+      }
+    } else {
+      setIsGeneratingSuggestion(true);
+      try {
+        const geminiKey = localStorage.getItem("gemini_api_key");
+        if (!geminiKey) throw new Error("Vui lòng cấu hình Gemini API Key trong phần Cài đặt để sử dụng tính năng AI.");
+        
+        const logSummary = getDaysInView().map(d => {
+          const logH = (dailyLoggedMap[d.dateStr] || 0) / 3600;
+          return `${d.dateStr} (${d.dayOfWeek}): ${logH.toFixed(1)}h`;
+        }).join("\n");
+
+        const prompt = `Bạn là một trợ lý quản lý thời gian. KPI log work của tôi đang bị thiếu giờ. 
+Tổng giờ OT khai báo: ${otHours}h, Tổng giờ nghỉ: ${leaveHours}h.
+Số giờ đã log theo từng ngày trong kỳ như sau:
+${logSummary}
+
+Quy định log work: Ngày thường phải log 7 giờ + số giờ OT - số giờ nghỉ. Ngày lễ/cuối tuần không cần log nhưng nếu có làm thì vẫn tính vào tổng.
+Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù vào ngày nào cho hợp lý nhất để đạt chỉ tiêu (tổng giờ = số ngày thường * 7 + ${otHours} - ${leaveHours}), ưu tiên bù vào những ngày thường chưa log đủ 7h. Phân tích ngắn gọn. Đừng dùng markdown format quá phức tạp.`;
+        
+        const aiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        });
+        if (aiRes.ok) {
+          const data = await aiRes.json();
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          setSuggestionText(text || "Không có gợi ý nào từ AI.");
+        } else {
+          throw new Error("Lỗi khi gọi AI API");
+        }
+      } catch (e: any) {
+        setSuggestionText("Lỗi: " + e.message);
+      } finally {
+        setIsGeneratingSuggestion(false);
+      }
+    }
+  };
+
   const lastMonday = new Date(currentMonday);
   lastMonday.setDate(lastMonday.getDate() - 7);
 
   const nextMonday = new Date(currentMonday);
   nextMonday.setDate(nextMonday.getDate() + 7);
 
-  const dayNames = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ Nhật"];
   const dailyLoggedSeconds = Array(7).fill(0);
   let thisWeekTotalSeconds = 0;
   let lastWeekTotalSeconds = 0;
@@ -803,6 +926,63 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Detailed Config Modal */}
+        {showConfigModal && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+            <div style={{ background: "var(--bg-secondary)", borderRadius: 16, width: 640, maxWidth: "90vw", maxHeight: "80vh", display: "flex", flexDirection: "column", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}>
+              <div style={{ padding: 20, borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 18, color: "var(--text-primary)" }}>Cấu hình OT/Nghỉ chi tiết</h3>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>Nhập số giờ OT và Nghỉ cho từng ngày trong tháng hiện tại.</div>
+                </div>
+                <button onClick={() => setShowConfigModal(false)} className="btn btn-ghost btn-sm">❌</button>
+              </div>
+              <div style={{ padding: 20, overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
+                {getDaysInView().map((d: any) => (
+                  <div key={d.dateStr} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)", borderRadius: 10 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: d.isWeekend || d.isHoliday ? "var(--accent-orange)" : "var(--text-primary)" }}>{d.dateStr}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{d.dayOfWeek} {d.isHoliday ? "(Nghỉ lễ)" : d.isWeekend ? "(Cuối tuần)" : ""}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-secondary)" }}>
+                        OT (h):
+                        <input type="number" min="0" value={tempDetailedConfig[d.dateStr]?.ot || ""} onChange={e => {
+                          const val = Number(e.target.value) || 0;
+                          setTempDetailedConfig(prev => ({ ...prev, [d.dateStr]: { ...prev[d.dateStr], ot: val, leave: prev[d.dateStr]?.leave || 0 } }));
+                        }} style={{ width: 60, padding: "4px 8px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text-primary)" }} placeholder="0" />
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-secondary)" }}>
+                        Nghỉ (h):
+                        <input type="number" min="0" value={tempDetailedConfig[d.dateStr]?.leave || ""} onChange={e => {
+                          const val = Number(e.target.value) || 0;
+                          setTempDetailedConfig(prev => ({ ...prev, [d.dateStr]: { ...prev[d.dateStr], ot: prev[d.dateStr]?.ot || 0, leave: val } }));
+                        }} style={{ width: 60, padding: "4px 8px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text-primary)" }} placeholder="0" />
+                      </label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding: 20, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                  Tổng OT: {Object.values(tempDetailedConfig).reduce((sum, c) => sum + (c.ot || 0), 0)}h | Tổng Nghỉ: {Object.values(tempDetailedConfig).reduce((sum, c) => sum + (c.leave || 0), 0)}h
+                </div>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button onClick={() => setShowConfigModal(false)} className="btn btn-secondary">Hủy</button>
+                  <button onClick={() => {
+                    setDetailedConfig(tempDetailedConfig);
+                    localStorage.setItem("dashboard_detailed_config", JSON.stringify(tempDetailedConfig));
+                    setShowConfigModal(false);
+                    alert("Đã lưu cấu hình chi tiết ngày!");
+                  }} className="btn btn-primary">
+                    Lưu cấu hình chi tiết
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {loading ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div className="stats-grid">
@@ -931,6 +1111,14 @@ export default function Dashboard() {
                         style={{ width: 80, padding: "4px 8px" }}
                       />
                     </div>
+                    
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
+                      <button className="btn btn-primary btn-sm" onClick={saveConfig} style={{ padding: "6px 12px", fontSize: 12 }}>💾 Lưu cấu hình</button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => {
+                        setTempDetailedConfig(detailedConfig);
+                        setShowConfigModal(true);
+                      }} style={{ padding: "6px 12px", fontSize: 12 }}>⚙️ Cấu hình chi tiết ngày</button>
+                    </div>
                   </div>
 
                   {/* Kết quả KPI */}
@@ -985,6 +1173,32 @@ export default function Dashboard() {
                         </span>
                       </div>
                     </div>
+
+                    {/* Suggestion Box */}
+                    {(kpiMonth > 1 || kpiToDate > 1) && (
+                      <div style={{ background: "rgba(245, 158, 11, 0.05)", border: "1px solid rgba(245, 158, 11, 0.2)", borderRadius: 12, padding: "16px 20px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--accent-orange)" }}>💡 Gợi ý Log bù giờ</div>
+                          <button 
+                            className="btn btn-secondary btn-sm" 
+                            onClick={handleGenerateSuggestion}
+                            disabled={isGeneratingSuggestion}
+                          >
+                            {isGeneratingSuggestion ? "Đang phân tích..." : configMatches ? "Kiểm tra ngày thiếu" : "✨ Nhờ AI phân tích"}
+                          </button>
+                        </div>
+                        {suggestionText && (
+                          <div style={{ fontSize: 13, color: "var(--text-secondary)", whiteSpace: "pre-wrap", background: "rgba(0,0,0,0.2)", padding: 12, borderRadius: 8 }}>
+                            {suggestionText}
+                          </div>
+                        )}
+                        {!suggestionText && (
+                          <div style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+                            Bấm nút bên trên để xem bạn nên log bù vào ngày nào để đạt đủ KPI.
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                   </div>
                 </div>
