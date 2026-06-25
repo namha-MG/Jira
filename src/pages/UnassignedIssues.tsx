@@ -21,6 +21,8 @@ export default function UnassignedIssues() {
     return d.toISOString().slice(0, 10);
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [ignoreDate, setIgnoreDate] = useState(false);
+  const [onlyWithLogWork, setOnlyWithLogWork] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 50;
   
@@ -40,8 +42,14 @@ export default function UnassignedIssues() {
     try {
       setLoading(true);
       setPage(1);
-      const dateClause = ` AND updated >= "${dateFrom} 00:00" AND updated <= "${dateTo} 23:59"`;
-      const jql = `project = "${selectedProject}" AND assignee is EMPTY${dateClause} ORDER BY updated DESC`;
+      let jql = `project = "${selectedProject}" AND assignee is EMPTY`;
+      if (!ignoreDate) {
+        jql += ` AND updated >= "${dateFrom} 00:00" AND updated <= "${dateTo} 23:59"`;
+      }
+      if (onlyWithLogWork) {
+        jql += ` AND timespent > 0`;
+      }
+      jql += ` ORDER BY updated DESC`;
       const data = await getAllIssuesByJql(jql, 500); // Lấy tối đa 500 task chưa gán
       setIssues(data);
       setSelectedIssues([]); // Xóa chọn khi tải lại
@@ -52,7 +60,7 @@ export default function UnassignedIssues() {
     } finally {
       setLoading(false);
     }
-  }, [selectedProject, dateFrom, dateTo]);
+  }, [selectedProject, dateFrom, dateTo, ignoreDate, onlyWithLogWork]);
 
   useEffect(() => {
     fetchUnassignedIssues();
@@ -129,8 +137,9 @@ export default function UnassignedIssues() {
           <h1 className="page-title">Task Chưa Gán (Unassigned)</h1>
           <p className="page-subtitle">Danh sách các Issue/Sub-task chưa được phân công cho bất kỳ ai.</p>
         </div>
-        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-          {/* Date Range Picker (Pill style) */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-end" }}>
+          <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+            {/* Date Range Picker (Pill style) */}
           <div style={{ display: "flex", alignItems: "center", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: "2px 4px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
             <div style={{ padding: "0 8px" }}>
               <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>Từ</span>
@@ -139,8 +148,8 @@ export default function UnassignedIssues() {
               type="date" 
               value={dateFrom} 
               onChange={e => setDateFrom(e.target.value)} 
-              style={{ border: "none", background: "transparent", outline: "none", padding: "6px 4px", color: "var(--text-primary)", fontSize: 13 }} 
-              disabled={loading} 
+              style={{ border: "none", background: "transparent", outline: "none", padding: "6px 4px", color: "var(--text-primary)", fontSize: 13, opacity: ignoreDate ? 0.5 : 1 }} 
+              disabled={loading || ignoreDate} 
             />
             
             <div style={{ width: 1, height: 20, background: "var(--border)", margin: "0 8px" }} />
@@ -152,8 +161,8 @@ export default function UnassignedIssues() {
               type="date" 
               value={dateTo} 
               onChange={e => setDateTo(e.target.value)} 
-              style={{ border: "none", background: "transparent", outline: "none", padding: "6px 4px", color: "var(--text-primary)", fontSize: 13 }} 
-              disabled={loading} 
+              style={{ border: "none", background: "transparent", outline: "none", padding: "6px 4px", color: "var(--text-primary)", fontSize: 13, opacity: ignoreDate ? 0.5 : 1 }} 
+              disabled={loading || ignoreDate} 
             />
           </div>
 
@@ -174,7 +183,18 @@ export default function UnassignedIssues() {
           </button>
           <NotificationBell />
         </div>
+        <div style={{ display: "flex", gap: 16, alignItems: "center", fontSize: 13, color: "var(--text-secondary)" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={ignoreDate} onChange={e => setIgnoreDate(e.target.checked)} />
+            Bỏ qua lọc ngày
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={onlyWithLogWork} onChange={e => setOnlyWithLogWork(e.target.checked)} />
+            Chỉ hiện task có log work
+          </label>
+        </div>
       </div>
+    </div>
 
       <div className="card" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {selectedIssues.length > 0 && (
