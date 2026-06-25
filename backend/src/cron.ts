@@ -72,25 +72,26 @@ async function processUser(pat: string, client: Client, runType: string = "CRON"
           toLog = 8 * 3600;
         }
 
-        if (toLog > 0) {
-          let logComment = "Tự động log work khi đến Due Date";
-          if (geminiKey) {
-            try {
-              const prompt = `Bạn là một kỹ sư phần mềm. Hãy viết một câu ngắn gọn, tự nhiên, bằng tiếng Việt (dưới 15 từ) để làm nội dung log work cho công việc có tiêu đề: "${issue.fields.summary}". Ví dụ: "Đã hoàn thành tối ưu hóa", "Xử lý xong lỗi hiển thị". Chỉ trả về nội dung câu log, không có dấu ngoặc kép hay giải thích thừa.`;
-              const aiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-              });
-              if (aiRes.ok) {
-                const data = await aiRes.json();
-                const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-                if (text) logComment = text;
-              }
-            } catch (e) {
-              console.warn("AI generation failed for auto log work, fallback to default", e);
+        let logComment = "Hoàn thành công việc theo yêu cầu";
+        if (geminiKey) {
+          try {
+            const prompt = `Bạn là một kỹ sư phần mềm. Hãy viết một câu ngắn gọn, tự nhiên, bằng tiếng Việt (dưới 15 từ) để làm nội dung log work cho công việc có tiêu đề: "${issue.fields.summary}". Ví dụ: "Đã hoàn thành tối ưu hóa", "Xử lý xong lỗi hiển thị". Chỉ trả về nội dung câu log, không có dấu ngoặc kép hay giải thích thừa.`;
+            const aiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+            });
+            if (aiRes.ok) {
+              const data = await aiRes.json();
+              const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+              if (text) logComment = text;
             }
+          } catch (e) {
+            console.warn("AI generation failed for auto log work, fallback to default", e);
           }
+        }
+
+        if (toLog > 0) {
 
           try {
             await addWorklog(api, issue.key, toLog, logComment);
@@ -118,7 +119,10 @@ async function processUser(pat: string, client: Client, runType: string = "CRON"
             closedKeywords.some(kw => t.name.toLowerCase().includes(kw))
           );
           if (toClosed) {
-            await transitionIssue(api, issue.key, toClosed.id);
+            await transitionIssue(api, issue.key, toClosed.id, {
+              customfield_10304: logComment,
+              resolution: { id: "10000" }
+            });
             console.log(`[Auto] Closed ${issue.key}`);
             closedCount++;
             processedTasks.add(issue.key);

@@ -36,10 +36,14 @@ export async function getTransitions(api: any, issueKey: string) {
   return res.data.transitions;
 }
 
-export async function transitionIssue(api: any, issueKey: string, transitionId: string) {
-  await api.post(`/issue/${issueKey}/transitions`, {
+export async function transitionIssue(api: any, issueKey: string, transitionId: string, fields?: any) {
+  const payload: any = {
     transition: { id: transitionId },
-  });
+  };
+  if (fields) {
+    payload.fields = fields;
+  }
+  await api.post(`/issue/${issueKey}/transitions`, payload);
 }
 
 export async function addWorklog(api: any, issueKey: string, timeSpentSeconds: number, comment: string) {
