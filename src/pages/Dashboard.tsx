@@ -145,7 +145,7 @@ export default function Dashboard() {
     if (!teamSelectedProject) return;
     try {
       setTeamLoadingTasks(true);
-      const jql = `project = "${teamSelectedProject}" AND assignee != currentUser() AND statusCategory != Done`;
+      const jql = `project = "${teamSelectedProject}" AND assignee != currentUser() ORDER BY updated DESC`;
       const allOtherIssues = await getAllIssuesByJql(jql, 500);
       
       const targets = allOtherIssues.filter((i) => {
@@ -161,6 +161,8 @@ export default function Dashboard() {
           statusName.includes("cancel") ||
           statusName.includes("hủy") ||
           statusName.includes("đóng");
+
+        if (isClosedOrCancelled) return false;
 
         const isResolved =
           statusName.includes("resolve") ||
