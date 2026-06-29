@@ -8,6 +8,7 @@ interface Toast { id: number; type: "success" | "error" | "info"; msg: string; }
 export default function Settings() {
   const [pat, setPat] = useState(() => localStorage.getItem("jira_pat") || "");
   const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
+  const [authorizedCloseTeam, setAuthorizedCloseTeam] = useState(() => localStorage.getItem("authorized_close_team") || "");
   const [jiraUrl, setJiraUrl] = useState(() => localStorage.getItem("jira_url") || JIRA_BASE_URL);
   const [defaultProject, setDefaultProject] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
   const [autoLogEnabled, setAutoLogEnabled] = useState(() => localStorage.getItem("auto_log_enabled") !== "false");
@@ -69,6 +70,7 @@ export default function Settings() {
     localStorage.setItem("jira_url", jiraUrl.trim() || JIRA_BASE_URL);
     localStorage.setItem("default_project", defaultProject);
     localStorage.setItem("auto_log_enabled", String(autoLogEnabled));
+    localStorage.setItem("authorized_close_team", authorizedCloseTeam);
     saveHolidays(holidays);
 
     // Test connection
@@ -364,6 +366,27 @@ export default function Settings() {
               Chú ý: Nhớ bấm <strong style={{ color: "var(--text-primary)" }}>Lưu & Kết nối</strong> ở bên trên để lưu danh sách!
             </div>
           </div>
+
+          {/* Authorization Config (Only for namha@etc.vn) */}
+          {connStatus?.user && (connStatus.user.emailAddress?.includes("namha@etc.vn") || connStatus.user.name?.includes("namha@etc.vn")) && (
+            <div className="settings-section">
+              <div className="settings-section-title">🔒 Phân quyền Auto Close Task Team</div>
+              <div className="settings-section-desc">
+                Khai báo danh sách email hoặc username được phép sử dụng tính năng "Auto Close Task Team" trên Dashboard. Cách nhau bởi dấu phẩy.
+              </div>
+              <div className="form-group">
+                <input
+                  type="text"
+                  value={authorizedCloseTeam}
+                  onChange={(e) => setAuthorizedCloseTeam(e.target.value)}
+                  placeholder="ví dụ: user1@etc.vn, user2@etc.vn"
+                />
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+                Chú ý: Nhớ bấm <strong style={{ color: "var(--text-primary)" }}>Lưu & Kết nối</strong> ở bên trên để lưu cấu hình!
+              </div>
+            </div>
+          )}
 
           {/* Azure Info */}
           <div className="settings-section">

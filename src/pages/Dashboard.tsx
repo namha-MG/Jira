@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 import {
-  getMyIssues, JiraIssue, formatSeconds, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment
+  getMyIssues, JiraIssue, formatSeconds, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, getCurrentUser, getAllIssuesByJql, JiraUser
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
@@ -52,6 +52,7 @@ function getIssueEstimatedSeconds(issue: JiraIssue): number {
 }
 
 export default function Dashboard() {
+  const [currentUser, setCurrentUser] = useState<JiraUser | null>(null);
   const [issues, setIssues] = useState<JiraIssue[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -132,6 +133,53 @@ export default function Dashboard() {
     setClosableTargets(targets);
     setSelectedTargets(new Set(targets.map(t => t.key)));
     setShowCloseModal(true);
+  };
+
+  const autoCloseOtherEmployeesTasks = async () => {
+    try {
+      setLoading(true);
+      const projectKeys = JIRA_PROJECTS.map(p => `"${p.key}"`).join(",");
+      const jql = `project in (${projectKeys}) AND assignee != currentUser() AND statusCategory != Done`;
+      const allOtherIssues = await getAllIssuesByJql(jql, 500);
+      
+      const targets = allOtherIssues.filter((i) => {
+        const statusName = i.fields.status?.name?.toLowerCase() || "";
+        const est = i.fields.timetracking?.originalEstimateSeconds || 0;
+        const logged = i.fields.timetracking?.timeSpentSeconds || 0;
+        const remain = i.fields.timetracking?.remainingEstimateSeconds || 0;
+
+        const isSubTask = i.fields.issuetype?.name?.toLowerCase().includes("sub-task") || i.fields.issuetype?.name?.toLowerCase().includes("subtask");
+
+        const isClosedOrCancelled =
+          statusName.includes("close") ||
+          statusName.includes("cancel") ||
+          statusName.includes("hủy") ||
+          statusName.includes("đóng");
+
+        const isResolved =
+          statusName.includes("resolve") ||
+          statusName.includes("done") ||
+          statusName.includes("hoàn thành") ||
+          statusName.includes("đã giải quyết");
+
+        const isCompleted = isSubTask ? isClosedOrCancelled : (isClosedOrCancelled || isResolved);
+
+        return est > 0 && logged >= est && remain === 0 && !isCompleted;
+      });
+
+      if (targets.length === 0) {
+        alert("🎉 Không tìm thấy task nào của nhân viên khác đã log đủ thời gian cần chuyển trạng thái!");
+        return;
+      }
+
+      setClosableTargets(targets);
+      setSelectedTargets(new Set(targets.map(t => t.key)));
+      setShowCloseModal(true);
+    } catch (e: any) {
+      alert("Lỗi khi tải task: " + e.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const executeAutoClose = async () => {
@@ -321,6 +369,13 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     try {
+      try {
+        const user = await getCurrentUser();
+        setCurrentUser(user);
+      } catch (e) {
+        console.warn("Lỗi lấy thông tin user", e);
+      }
+
       const projectKeys = JIRA_PROJECTS.map((p) => p.key);
       const result = await getMyIssues({ projectKeys, maxResults: 200 });
       setIssues(result.issues);
@@ -774,6 +829,36 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
         </div>
 
         <div className="page-actions" style={{ marginLeft: 0, display: "flex", gap: 8 }}>
+          {(() => {
+            const isNamha = currentUser?.emailAddress?.includes("namha@etc.vn") || currentUser?.name?.includes("namha@etc.vn");
+            const authStr = localStorage.getItem("authorized_close_team") || "";
+            const authList = authStr.toLowerCase().split(",").map(s => s.trim()).filter(Boolean);
+            const userEmail = currentUser?.emailAddress?.toLowerCase() || "";
+            const userName = currentUser?.name?.toLowerCase() || "";
+            const isAuthorized = isNamha || authList.some(a => userEmail.includes(a) || userName.includes(a));
+            
+            if (!isAuthorized) return null;
+            return (
+              <button
+                className="btn btn-sm"
+                onClick={autoCloseOtherEmployeesTasks}
+                disabled={loading || transitioning}
+                title="Tìm và đóng task của nhân viên khác trong dự án"
+                style={{
+                  background: "linear-gradient(135deg, #f59e0b, #ef4444)",
+                  color: "white",
+                  border: "none",
+                  fontWeight: 500,
+                  padding: "6px 14px",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  boxShadow: "0 4px 12px rgba(239, 68, 68, 0.25)"
+                }}
+              >
+                ⚡ Auto Close Task Team
+              </button>
+            );
+          })()}
           <button
             className="btn btn-sm"
             onClick={autoCloseLoggedTasks}
