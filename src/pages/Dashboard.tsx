@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 import {
-  getMyIssues, JiraIssue, JiraWorklog, formatSeconds, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, getCurrentUser, getAllIssuesByJql, getWorklogs, JiraUser
+  getMyIssues, JiraIssue, JiraWorklog, formatSeconds, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, getCurrentUser, getIssuesByJqlPage, getWorklogs, getAssignableUsers, JiraUser
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
@@ -28,6 +28,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const CHART_COLORS = ["#4f8ef7", "#8b5cf6", "#10b981", "#f59e0b", "#ef4444"];
+const TEAM_CLOSE_PAGE_SIZE = 50;
 
 function getBadgeClass(status: string): string {
   if (status === "In Progress") return "badge badge-inprogress";
@@ -99,12 +100,69 @@ function getIssueWorklogSeconds(
 
 function getTeamAssigneeKey(issue: JiraIssue): string {
   const assignee = issue.fields.assignee;
-  return assignee?.accountId || assignee?.name || assignee?.emailAddress || "__unassigned__";
+  return assignee?.name || assignee?.accountId || assignee?.emailAddress || "__unassigned__";
 }
 
 function getTeamAssigneeLabel(issue: JiraIssue): string {
   const assignee = issue.fields.assignee;
   return assignee?.displayName || assignee?.name || assignee?.emailAddress || "Unassigned";
+}
+
+function getUserFilterValue(user: JiraUser): string {
+  return user.name || user.accountId || user.emailAddress;
+}
+
+function issueMatchesAssigneeFilter(issue: JiraIssue, assigneeFilter: string): boolean {
+  if (assigneeFilter === "all") return true;
+
+  const normalizedFilter = assigneeFilter.trim().toLowerCase();
+  return userIdentityKeys(issue.fields.assignee).includes(normalizedFilter);
+}
+
+function escapeJqlValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+}
+
+function buildTeamSearchClause(searchQuery: string): string {
+  const query = searchQuery.trim();
+  if (!query) return "";
+
+  const escaped = escapeJqlValue(query);
+  if (/^\d+$/.test(query)) {
+    return `(id = ${query} OR summary ~ "${escaped}")`;
+  }
+
+  if (/^[A-Z][A-Z0-9_]*-\d+$/i.test(query)) {
+    return `(key = "${escapeJqlValue(query.toUpperCase())}" OR summary ~ "${escaped}")`;
+  }
+
+  return `summary ~ "${escaped}"`;
+}
+
+function buildTeamCloseJql(
+  projectKey: string,
+  assigneeFilter: string,
+  searchQuery: string,
+  optimized: boolean
+): string {
+  const clauses = [
+    `project = "${escapeJqlValue(projectKey)}"`,
+    "assignee != currentUser()",
+  ];
+
+  if (assigneeFilter !== "all") {
+    clauses.push(`assignee = "${escapeJqlValue(assigneeFilter)}"`);
+  }
+
+  if (optimized) {
+    clauses.push("statusCategory = Done");
+    clauses.push("timespent > 0");
+  }
+
+  const searchClause = buildTeamSearchClause(searchQuery);
+  if (searchClause) clauses.push(searchClause);
+
+  return `${clauses.join(" AND ")} ORDER BY updated DESC`;
 }
 
 export default function Dashboard() {
@@ -142,6 +200,11 @@ export default function Dashboard() {
   const [teamLoadingTasks, setTeamLoadingTasks] = useState(false);
   const [teamAssigneeFilter, setTeamAssigneeFilter] = useState("all");
   const [teamSearchQuery, setTeamSearchQuery] = useState("");
+  const [debouncedTeamSearchQuery, setDebouncedTeamSearchQuery] = useState("");
+  const [teamPage, setTeamPage] = useState(0);
+  const [teamTotal, setTeamTotal] = useState(0);
+  const [teamAssignableUsers, setTeamAssignableUsers] = useState<JiraUser[]>([]);
+  const [teamLoadingAssignees, setTeamLoadingAssignees] = useState(false);
 
   const [commentIssueKey, setCommentIssueKey] = useState<string | null>(null);
   const [commentText, setCommentText] = useState("");
@@ -203,16 +266,21 @@ export default function Dashboard() {
     if (!teamSelectedProject) return;
     try {
       setTeamLoadingTasks(true);
-      const jql = `project = "${teamSelectedProject}" AND assignee != currentUser() ORDER BY updated DESC`;
-      const allOtherIssues = await getAllIssuesByJql(jql, 2000);
-      
-      const targets = allOtherIssues.filter((i) => {
-        const statusName = i.fields.status?.name?.toLowerCase() || "";
-        const est = i.fields.timetracking?.originalEstimateSeconds || 0;
-        const logged = i.fields.timetracking?.timeSpentSeconds || 0;
-        const remain = i.fields.timetracking?.remainingEstimateSeconds || 0;
+      const startAt = teamPage * TEAM_CLOSE_PAGE_SIZE;
+      const optimizedJql = buildTeamCloseJql(teamSelectedProject, teamAssigneeFilter, debouncedTeamSearchQuery, true);
+      const fallbackJql = buildTeamCloseJql(teamSelectedProject, teamAssigneeFilter, debouncedTeamSearchQuery, false);
+      let pageResult;
 
-        const isSubTask = i.fields.issuetype?.name?.toLowerCase().includes("sub-task") || i.fields.issuetype?.name?.toLowerCase().includes("subtask");
+      try {
+        pageResult = await getIssuesByJqlPage(optimizedJql, startAt, TEAM_CLOSE_PAGE_SIZE);
+      } catch (err) {
+        console.warn("JQL tối ưu tải task team thất bại, fallback sang JQL cơ bản", err);
+        pageResult = await getIssuesByJqlPage(fallbackJql, startAt, TEAM_CLOSE_PAGE_SIZE);
+      }
+      
+      const targets = pageResult.issues.filter((i) => {
+        const statusName = i.fields.status?.name?.toLowerCase() || "";
+        const logged = i.fields.timetracking?.timeSpentSeconds || 0;
 
         const isClosedOrCancelled =
           statusName.includes("close") ||
@@ -233,13 +301,17 @@ export default function Dashboard() {
       });
 
       setTeamClosableTargets(targets);
+      setTeamTotal(pageResult.total);
       setTeamSelectedTargets(new Set(targets.map(t => t.key)));
     } catch (e: any) {
       console.error("Lỗi khi tải task team:", e);
+      setTeamClosableTargets([]);
+      setTeamTotal(0);
+      setTeamSelectedTargets(new Set());
     } finally {
       setTeamLoadingTasks(false);
     }
-  }, [teamSelectedProject]);
+  }, [teamSelectedProject, teamAssigneeFilter, debouncedTeamSearchQuery, teamPage]);
 
   useEffect(() => {
     if (showTeamCloseModal) {
@@ -247,12 +319,51 @@ export default function Dashboard() {
     }
   }, [showTeamCloseModal, fetchTeamTasks]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setTeamPage(0);
+      setDebouncedTeamSearchQuery(teamSearchQuery.trim());
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [teamSearchQuery]);
+
+  useEffect(() => {
+    if (!showTeamCloseModal || !teamSelectedProject) return;
+
+    let active = true;
+    setTeamLoadingAssignees(true);
+    getAssignableUsers(teamSelectedProject)
+      .then((users) => {
+        if (!active) return;
+        const currentUserKeys = userIdentityKeys(currentUser);
+        setTeamAssignableUsers(users.filter((user) => {
+          const keys = userIdentityKeys(user);
+          return !keys.some(key => currentUserKeys.includes(key));
+        }));
+      })
+      .catch((e) => {
+        if (!active) return;
+        console.warn("Lỗi tải danh sách assignee", e);
+        setTeamAssignableUsers([]);
+      })
+      .finally(() => {
+        if (active) setTeamLoadingAssignees(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [showTeamCloseModal, teamSelectedProject, currentUser]);
+
   const autoCloseOtherEmployeesTasks = () => {
     if (!teamSelectedProject) {
       setTeamSelectedProject(localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
     }
     setTeamAssigneeFilter("all");
     setTeamSearchQuery("");
+    setDebouncedTeamSearchQuery("");
+    setTeamPage(0);
     setShowTeamCloseModal(true);
   };
 
@@ -933,23 +1044,30 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
     .sort((a, b) => new Date(b.fields.updated).getTime() - new Date(a.fields.updated).getTime())
     .slice(0, 8);
 
-  const teamAssigneeOptions = Array.from(
-    new Map(
-      teamClosableTargets.map(issue => [
-        getTeamAssigneeKey(issue),
-        { key: getTeamAssigneeKey(issue), label: getTeamAssigneeLabel(issue) },
-      ])
-    ).values()
-  ).sort((a, b) => a.label.localeCompare(b.label));
+  const teamAssigneeOptions = teamAssignableUsers.length > 0
+    ? teamAssignableUsers
+      .map(user => ({ key: getUserFilterValue(user), label: user.displayName || user.name || user.emailAddress }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+    : Array.from(
+      new Map(
+        teamClosableTargets.map(issue => [
+          getTeamAssigneeKey(issue),
+          { key: getTeamAssigneeKey(issue), label: getTeamAssigneeLabel(issue) },
+        ])
+      ).values()
+    ).sort((a, b) => a.label.localeCompare(b.label));
 
   const normalizedTeamSearch = teamSearchQuery.trim().toLowerCase();
+  const normalizedTeamSearchTokens = normalizedTeamSearch.split(/\s+/).filter(Boolean);
   const filteredTeamClosableTargets = teamClosableTargets.filter((issue) => {
-    const matchesAssignee = teamAssigneeFilter === "all" || getTeamAssigneeKey(issue) === teamAssigneeFilter;
+    const matchesAssignee = issueMatchesAssigneeFilter(issue, teamAssigneeFilter);
+    const summary = (issue.fields.summary || "").toLowerCase();
     const matchesSearch =
       !normalizedTeamSearch ||
       issue.id.toLowerCase().includes(normalizedTeamSearch) ||
       issue.key.toLowerCase().includes(normalizedTeamSearch) ||
-      (issue.fields.summary || "").toLowerCase().includes(normalizedTeamSearch);
+      summary.includes(normalizedTeamSearch) ||
+      normalizedTeamSearchTokens.every(token => summary.includes(token));
 
     return matchesAssignee && matchesSearch;
   });
@@ -957,6 +1075,11 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
   const allFilteredTeamTargetsSelected =
     filteredTeamClosableTargets.length > 0 &&
     filteredTeamClosableTargets.every(t => teamSelectedTargets.has(t.key));
+  const teamPageCount = Math.max(1, Math.ceil(teamTotal / TEAM_CLOSE_PAGE_SIZE));
+  const teamPageStart = teamTotal === 0 ? 0 : teamPage * TEAM_CLOSE_PAGE_SIZE + 1;
+  const teamPageEnd = Math.min((teamPage + 1) * TEAM_CLOSE_PAGE_SIZE, teamTotal);
+  const canGoPrevTeamPage = teamPage > 0;
+  const canGoNextTeamPage = (teamPage + 1) * TEAM_CLOSE_PAGE_SIZE < teamTotal;
 
   if (!isConfigured) {
     return (
@@ -1174,6 +1297,8 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
                         setTeamSelectedProject(e.target.value);
                         setTeamAssigneeFilter("all");
                         setTeamSearchQuery("");
+                        setDebouncedTeamSearchQuery("");
+                        setTeamPage(0);
                       }}
                       style={{ padding: "6px 12px", borderRadius: 6, background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)", cursor: "pointer", outline: "none", fontSize: 14 }}
                     >
@@ -1189,12 +1314,15 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
               <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "grid", gridTemplateColumns: "minmax(180px, 240px) minmax(220px, 1fr) auto", gap: 12, alignItems: "center" }}>
                 <select
                   value={teamAssigneeFilter}
-                  onChange={(e) => setTeamAssigneeFilter(e.target.value)}
-                  disabled={teamLoadingTasks || teamClosableTargets.length === 0}
+                  onChange={(e) => {
+                    setTeamAssigneeFilter(e.target.value);
+                    setTeamPage(0);
+                  }}
+                  disabled={teamLoadingTasks || teamAssigneeOptions.length === 0}
                   style={{ padding: "8px 12px", borderRadius: 6, background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)", cursor: "pointer", outline: "none", fontSize: 13, minWidth: 0 }}
                   title="Lọc theo assignee"
                 >
-                  <option value="all">Tất cả assignee</option>
+                  <option value="all">{teamLoadingAssignees ? "Đang tải assignee..." : "Tất cả assignee"}</option>
                   {teamAssigneeOptions.map(option => (
                     <option key={option.key} value={option.key}>{option.label}</option>
                   ))}
@@ -1202,7 +1330,7 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
                 <input
                   value={teamSearchQuery}
                   onChange={(e) => setTeamSearchQuery(e.target.value)}
-                  disabled={teamLoadingTasks || teamClosableTargets.length === 0}
+                  disabled={teamLoadingTasks}
                   placeholder="Tìm theo ID hoặc tên ticket"
                   style={{ padding: "8px 12px", borderRadius: 6, background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)", outline: "none", fontSize: 13, minWidth: 0 }}
                 />
@@ -1212,6 +1340,8 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
                   onClick={() => {
                     setTeamAssigneeFilter("all");
                     setTeamSearchQuery("");
+                    setDebouncedTeamSearchQuery("");
+                    setTeamPage(0);
                   }}
                   style={{ whiteSpace: "nowrap" }}
                 >
@@ -1223,11 +1353,11 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
                 {teamLoadingTasks ? (
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40, color: "var(--text-secondary)" }}>
                     <div className="spinning" style={{ fontSize: 32, marginBottom: 12 }}>⏳</div>
-                    Đang tìm các task đã Resolved và có Log work của dự án {teamSelectedProject}...
+                    Đang tải trang {teamPage + 1} các task đã Resolved và có Log work của dự án {teamSelectedProject}...
                   </div>
                 ) : teamClosableTargets.length === 0 ? (
                   <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)" }}>
-                    🎉 Không tìm thấy task nào của nhân viên khác (dự án {teamSelectedProject}) đang ở trạng thái Resolved và có log work cần đóng.
+                    🎉 Không tìm thấy task nào ở trang này của dự án {teamSelectedProject} đang ở trạng thái Resolved và có log work cần đóng.
                   </div>
                 ) : filteredTeamClosableTargets.length === 0 ? (
                   <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)" }}>
@@ -1288,8 +1418,25 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
                   <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
                     Đang chọn {filteredTeamSelectedCount}/{filteredTeamClosableTargets.length}
                   </span>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Trang {teamPage + 1}/{teamPageCount} ({teamPageStart}-{teamPageEnd}/{teamTotal})
+                  </span>
                 </div>
                 <div style={{ display: "flex", gap: 12 }}>
+                  <button
+                    onClick={() => setTeamPage(p => Math.max(0, p - 1))}
+                    className="btn btn-secondary"
+                    disabled={teamLoadingTasks || !canGoPrevTeamPage}
+                  >
+                    Trước
+                  </button>
+                  <button
+                    onClick={() => setTeamPage(p => p + 1)}
+                    className="btn btn-secondary"
+                    disabled={teamLoadingTasks || !canGoNextTeamPage}
+                  >
+                    Sau
+                  </button>
                   <button onClick={() => setShowTeamCloseModal(false)} className="btn btn-secondary">Đóng</button>
                   <button onClick={executeTeamAutoClose} className="btn btn-primary" disabled={filteredTeamSelectedCount === 0}>
                     Xác nhận đóng ({filteredTeamSelectedCount}) task

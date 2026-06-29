@@ -314,6 +314,30 @@ export async function getAllIssuesByJql(
   return allIssues;
 }
 
+/** Lấy issues theo JQL với phân trang chủ động */
+export async function getIssuesByJqlPage(
+  jql: string,
+  startAt: number = 0,
+  maxResults: number = 50
+): Promise<{ issues: JiraIssue[]; total: number; startAt: number; maxResults: number }> {
+  const fields = [
+    "summary", "status", "priority", "assignee", "reporter",
+    "timetracking", "worklog", "created", "updated", "duedate",
+    "project", "issuetype", "description", "customfield_10300", "customfield_10302", "parent", "subtasks", "attachment"
+  ];
+
+  const res = await jiraApi.get("/search", {
+    params: { jql, maxResults, startAt, fields: fields.join(",") },
+  });
+
+  return {
+    issues: res.data.issues || [],
+    total: res.data.total || 0,
+    startAt: res.data.startAt ?? startAt,
+    maxResults: res.data.maxResults ?? maxResults,
+  };
+}
+
 /** Lấy worklogs của issue */
 export async function getWorklogs(issueKey: string): Promise<JiraWorklog[]> {
   const maxResults = 100;
