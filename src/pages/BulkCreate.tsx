@@ -441,22 +441,30 @@ export default function BulkCreate() {
     let currentLogDate = getNextWorkday(new Date(startDate));
 
     for (let i = 0; i < summaries.length; i++) {
-      let taskStartDateStr = "";
-      let taskEndDateStr = "";
-      let taskEstimate = estimate;
+      let taskStartDateStr: string | undefined = undefined;
+      let taskEndDateStr: string | undefined = undefined;
+      let taskEstimate: string | undefined = estimate;
       let taskAutoLogWork = autoLogWork;
       let taskLogDate = currentLogDate;
       let taskLogStartDateStr = "";
 
       if (summaries[i].isManualRow) {
         const row = summaries[i];
-        taskLogDate = new Date(row.startDate);
-        const rowEndDate = new Date(row.endDate);
-        taskStartDateStr = formatJiraIsoDate(taskLogDate, 8, 0);
-        taskEndDateStr = formatJiraIsoDate(rowEndDate, 17, 0);
-        taskEstimate = row.estimate;
+        if (row.startDate) {
+          taskLogDate = new Date(row.startDate);
+          taskStartDateStr = formatJiraIsoDate(taskLogDate, 8, 0);
+          taskLogStartDateStr = taskLogDate.toISOString().replace("Z", "+0000");
+        } else {
+          taskLogDate = new Date(); // Fallback for logDateFormatted
+        }
+
+        if (row.endDate) {
+          const rowEndDate = new Date(row.endDate);
+          taskEndDateStr = formatJiraIsoDate(rowEndDate, 17, 0);
+        }
+
+        taskEstimate = row.estimate || undefined;
         taskAutoLogWork = row.autoLogWork;
-        taskLogStartDateStr = taskLogDate.toISOString().replace("Z", "+0000");
       } else {
         if (i > 0) {
           currentLogDate = advanceDay(currentLogDate);
@@ -489,6 +497,10 @@ export default function BulkCreate() {
       );
 
       try {
+        let customFieldsObj: any = {};
+        if (taskStartDateStr) customFieldsObj["customfield_10300"] = taskStartDateStr;
+        if (taskEndDateStr) customFieldsObj["customfield_10302"] = taskEndDateStr;
+
         let createdKey = "";
         if (manualMode === "subtask") {
           const sCreated = await createSubTask({
@@ -497,10 +509,7 @@ export default function BulkCreate() {
             summary: summaries[i].summary,
             assigneeName: summaries[i].assignee ? summaries[i].assignee : undefined,
             originalEstimate: taskEstimate,
-            customFields: {
-              "customfield_10300": taskStartDateStr,
-              "customfield_10302": taskEndDateStr,
-            }
+            customFields: Object.keys(customFieldsObj).length > 0 ? customFieldsObj : undefined
           });
           createdKey = sCreated.key;
         } else {
@@ -509,15 +518,12 @@ export default function BulkCreate() {
             summary: summaries[i].summary,
             assigneeName: summaries[i].assignee ? summaries[i].assignee : undefined,
             originalEstimate: taskEstimate,
-            customFields: {
-              "customfield_10300": taskStartDateStr,
-              "customfield_10302": taskEndDateStr,
-            }
+            customFields: Object.keys(customFieldsObj).length > 0 ? customFieldsObj : undefined
           });
           createdKey = created.key;
         }
 
-        if (taskAutoLogWork) {
+        if (taskAutoLogWork && taskLogStartDateStr) {
           let logComment = `Thực hiện công việc: ${summaries[i].summary}`;
           const geminiKey = localStorage.getItem("gemini_api_key");
           if (geminiKey) {
@@ -1171,7 +1177,6 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                               setManualRows(newRows);
                             }}
                             disabled={isRunning}
-                            required
                           />
                           <input
                             type="date"
@@ -1183,7 +1188,6 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                               setManualRows(newRows);
                             }}
                             disabled={isRunning}
-                            required
                           />
                           <input
                             type="text"
@@ -1196,7 +1200,6 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                               setManualRows(newRows);
                             }}
                             disabled={isRunning}
-                            required
                           />
                           <label style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, fontSize: 11, cursor: "pointer" }}>
                             <input
