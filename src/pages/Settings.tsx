@@ -130,15 +130,40 @@ export default function Settings() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div className="page-header">
+      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
         <div className="page-title-group">
           <h1 className="page-title">Cài đặt</h1>
           <p className="page-subtitle">Kết nối Jira và cấu hình hệ thống</p>
         </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            id="btn-save-jira-config"
+            className="btn btn-primary"
+            onClick={handleSave}
+            disabled={saving || testing}
+          >
+            {saving ? <><span className="spinning">⏳</span> Đang lưu...</> : "💾 Lưu & Kết nối"}
+          </button>
+          <button
+            id="btn-test-connection"
+            className="btn btn-secondary"
+            onClick={testConn}
+            disabled={testing || !pat}
+          >
+            {testing ? <><span className="spinning">🔄</span> Đang kiểm tra...</> : "🔌 Test kết nối"}
+          </button>
+          <button
+            id="btn-clear-config"
+            className="btn btn-danger"
+            onClick={handleClear}
+          >
+            🗑️ Xóa
+          </button>
+        </div>
       </div>
 
       <div className="page-body">
-        <div style={{ maxWidth: 640 }}>
+        <div style={{ maxWidth: 1400, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(480px, 1fr))", gap: 32, alignItems: "start" }}>
           {/* Jira Connection */}
           <div className="settings-section">
             <div className="settings-section-title">🔗 Kết nối Jira Server</div>
@@ -239,31 +264,7 @@ export default function Settings() {
               </div>
             )}
 
-            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-              <button
-                id="btn-save-jira-config"
-                className="btn btn-primary"
-                onClick={handleSave}
-                disabled={saving || testing}
-              >
-                {saving ? <><span className="spinning">⏳</span> Đang lưu...</> : "💾 Lưu & Kết nối"}
-              </button>
-              <button
-                id="btn-test-connection"
-                className="btn btn-secondary"
-                onClick={testConn}
-                disabled={testing || !pat}
-              >
-                {testing ? <><span className="spinning">🔄</span> Đang kiểm tra...</> : "🔌 Test kết nối"}
-              </button>
-              <button
-                id="btn-clear-config"
-                className="btn btn-danger"
-                onClick={handleClear}
-              >
-                🗑️ Xóa
-              </button>
-            </div>
+
           </div>
 
           {/* Background Job Config */}
