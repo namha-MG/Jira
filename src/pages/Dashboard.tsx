@@ -166,11 +166,10 @@ export default function Dashboard() {
           statusName.includes("resolve") ||
           statusName.includes("done") ||
           statusName.includes("hoàn thành") ||
+          statusName.includes("ready for test") ||
           statusName.includes("đã giải quyết");
 
-        const isCompleted = isSubTask ? isClosedOrCancelled : (isClosedOrCancelled || isResolved);
-
-        return est > 0 && logged >= est && remain === 0 && !isCompleted;
+        return isResolved && logged > 0;
       });
 
       setTeamClosableTargets(targets);
@@ -1099,11 +1098,11 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
                 {teamLoadingTasks ? (
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40, color: "var(--text-secondary)" }}>
                     <div className="spinning" style={{ fontSize: 32, marginBottom: 12 }}>⏳</div>
-                    Đang tìm các task đủ giờ của dự án {teamSelectedProject}...
+                    Đang tìm các task đã Resolved và có Log work của dự án {teamSelectedProject}...
                   </div>
                 ) : teamClosableTargets.length === 0 ? (
                   <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)" }}>
-                    🎉 Không tìm thấy task nào của nhân viên khác (dự án {teamSelectedProject}) đã log đủ thời gian cần chuyển trạng thái.
+                    🎉 Không tìm thấy task nào của nhân viên khác (dự án {teamSelectedProject}) đang ở trạng thái Resolved và có log work cần đóng.
                   </div>
                 ) : (
                   teamClosableTargets.map(t => (
