@@ -6,6 +6,15 @@ import { JIRA_PROJECTS } from "../config";
 import { copyToClipboard } from "../utils";
 import { bulkCreateStore, CreationLog } from "../stores/bulkCreateStore";
 
+export interface ManualTaskRow {
+  id: string;
+  summary: string;
+  startDate: string;
+  endDate: string;
+  estimate: string;
+  autoLogWork: boolean;
+}
+
 const parseExcelDate = (val: any): Date | null => {
   if (!val) return null;
   if (val instanceof Date && !isNaN(val.getTime())) return val;
@@ -45,6 +54,12 @@ export default function BulkCreate() {
   const isRunning = useSyncExternalStore(bulkCreateStore.subscribe, bulkCreateStore.getIsRunning);
   const setLogs = bulkCreateStore.setLogs;
   const setIsRunning = bulkCreateStore.setIsRunning;
+
+  const [useGeneralConfig, setUseGeneralConfig] = useState(false);
+  const [manualRows, setManualRows] = useState<ManualTaskRow[]>(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return [{ id: Date.now().toString(), summary: "", startDate: today, endDate: today, estimate: "7h", autoLogWork: true }];
+  });
 
   const [availableSprints, setAvailableSprints] = useState<JiraSprint[]>([]);
   const [selectedSprint, setSelectedSprint] = useState<string>("");
@@ -403,13 +418,14 @@ export default function BulkCreate() {
   const handleBulkCreateManual = async (e: React.FormEvent | null, tasksToCreate?: {summary: string, assignee: string}[]) => {
     if (e) e.preventDefault();
     
-    const summaries = tasksToCreate 
-      ? tasksToCreate.filter((s) => s.summary.trim().length > 0)
-      : bulkText
-          .split("\n")
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0)
-          .map((s) => ({ summary: s, assignee: assignee.trim() }));
+    let summaries: any[] = [];
+    if (tasksToCreate) {
+      summaries = tasksToCreate.filter(s => s.summary.trim().length > 0).map(s => ({ ...s, isManualRow: false }));
+    } else if (useGeneralConfig) {
+      summaries = bulkText.split("\n").map(s => s.trim()).filter(s => s.length > 0).map(s => ({ summary: s, assignee: assignee.trim(), isManualRow: false }));
+    } else {
+      summaries = manualRows.filter(r => r.summary.trim().length > 0).map(r => ({ ...r, assignee: assignee.trim(), isManualRow: true }));
+    }
 
     if (summaries.length === 0) return;
 
@@ -425,11 +441,33 @@ export default function BulkCreate() {
     let currentLogDate = getNextWorkday(new Date(startDate));
 
     for (let i = 0; i < summaries.length; i++) {
-      if (i > 0) {
-        currentLogDate = advanceDay(currentLogDate);
+      let taskStartDateStr = "";
+      let taskEndDateStr = "";
+      let taskEstimate = estimate;
+      let taskAutoLogWork = autoLogWork;
+      let taskLogDate = currentLogDate;
+      let taskLogStartDateStr = "";
+
+      if (summaries[i].isManualRow) {
+        const row = summaries[i];
+        taskLogDate = new Date(row.startDate);
+        const rowEndDate = new Date(row.endDate);
+        taskStartDateStr = formatJiraIsoDate(taskLogDate, 8, 0);
+        taskEndDateStr = formatJiraIsoDate(rowEndDate, 17, 0);
+        taskEstimate = row.estimate;
+        taskAutoLogWork = row.autoLogWork;
+        taskLogStartDateStr = taskLogDate.toISOString().replace("Z", "+0000");
+      } else {
+        if (i > 0) {
+          currentLogDate = advanceDay(currentLogDate);
+          taskLogDate = currentLogDate;
+        }
+        taskStartDateStr = formatJiraIsoDate(taskLogDate, 8, 0);
+        taskEndDateStr = formatJiraIsoDate(taskLogDate, 17, 0);
+        taskLogStartDateStr = taskLogDate.toISOString().replace("Z", "+0000");
       }
 
-      const logDateFormatted = currentLogDate.toLocaleDateString("vi-VN", {
+      const logDateFormatted = taskLogDate.toLocaleDateString("vi-VN", {
         weekday: "short",
         year: "numeric",
         month: "numeric",
@@ -442,7 +480,7 @@ export default function BulkCreate() {
             ? { 
                 ...log, 
                 status: "processing", 
-                logDateText: autoLogWork 
+                logDateText: taskAutoLogWork 
                   ? `Lên lịch log: ${logDateFormatted}` 
                   : `Lên lịch gán ngày: ${logDateFormatted}` 
               } 
@@ -451,9 +489,6 @@ export default function BulkCreate() {
       );
 
       try {
-        const startDateStr = formatJiraIsoDate(currentLogDate, 8, 0);
-        const endDateStr = formatJiraIsoDate(currentLogDate, 17, 0);
-
         let createdKey = "";
         if (manualMode === "subtask") {
           const sCreated = await createSubTask({
@@ -461,10 +496,10 @@ export default function BulkCreate() {
             projectKey: selectedProject,
             summary: summaries[i].summary,
             assigneeName: summaries[i].assignee ? summaries[i].assignee : undefined,
-            originalEstimate: estimate,
+            originalEstimate: taskEstimate,
             customFields: {
-              "customfield_10300": startDateStr,
-              "customfield_10302": endDateStr,
+              "customfield_10300": taskStartDateStr,
+              "customfield_10302": taskEndDateStr,
             }
           });
           createdKey = sCreated.key;
@@ -473,17 +508,16 @@ export default function BulkCreate() {
             projectKey: selectedProject,
             summary: summaries[i].summary,
             assigneeName: summaries[i].assignee ? summaries[i].assignee : undefined,
-            originalEstimate: estimate,
+            originalEstimate: taskEstimate,
             customFields: {
-              "customfield_10300": startDateStr,
-              "customfield_10302": endDateStr,
+              "customfield_10300": taskStartDateStr,
+              "customfield_10302": taskEndDateStr,
             }
           });
           createdKey = created.key;
         }
 
-        if (autoLogWork) {
-          const startedStr = currentLogDate.toISOString().replace("Z", "+0000");
+        if (taskAutoLogWork) {
           let logComment = `Thực hiện công việc: ${summaries[i].summary}`;
           const geminiKey = localStorage.getItem("gemini_api_key");
           if (geminiKey) {
@@ -506,10 +540,19 @@ export default function BulkCreate() {
             }
           }
 
+          // Parse estimate string (e.g. "4h" -> 4 * 3600, "1d" -> 8 * 3600)
+          let loggedSeconds = 7 * 3600;
+          if (taskEstimate) {
+            const hMatch = taskEstimate.match(/(\d+)\s*h/);
+            const dMatch = taskEstimate.match(/(\d+)\s*d/);
+            if (hMatch) loggedSeconds = parseInt(hMatch[1]) * 3600;
+            else if (dMatch) loggedSeconds = parseInt(dMatch[1]) * 8 * 3600;
+          }
+
           await addWorklog(createdKey, {
-            timeSpentSeconds: 7 * 3600,
+            timeSpentSeconds: loggedSeconds,
             comment: logComment,
-            started: startedStr,
+            started: taskLogStartDateStr,
             adjustEstimate: "auto",
           });
         }
@@ -541,7 +584,12 @@ export default function BulkCreate() {
 
     setIsRunning(false);
     if (!tasksToCreate) {
-      setBulkText("");
+      if (useGeneralConfig) {
+        setBulkText("");
+      } else {
+        const today = new Date().toISOString().slice(0, 10);
+        setManualRows([{ id: Date.now().toString(), summary: "", startDate: today, endDate: today, estimate: "7h", autoLogWork: true }]);
+      }
     } else {
       setAnalyzedTasks([]);
       setAiContext("");
@@ -1027,21 +1075,22 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                     </div>
                   )}
 
-                  <div className="form-group">
-                    <label>Danh sách tóm tắt Issue (Mỗi dòng là 1 Issue) *</label>
-                    <textarea
-                      placeholder="Ví dụ:&#10;Thiết kế giao diện trang chủ&#10;Viết API đồng bộ hóa dữ liệu"
-                      value={bulkText}
-                      onChange={(e) => setBulkText(e.target.value)}
+                  <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
+                    <input
+                      id="checkbox-general-config"
+                      type="checkbox"
+                      checked={useGeneralConfig}
+                      onChange={(e) => setUseGeneralConfig(e.target.checked)}
                       disabled={isRunning}
-                      rows={8}
-                      style={{ fontFamily: "inherit", lineHeight: "1.5" }}
-                      required
+                      style={{ width: "auto", margin: 0, cursor: "pointer" }}
                     />
+                    <label htmlFor="checkbox-general-config" style={{ cursor: "pointer", fontWeight: "bold", fontSize: 13, userSelect: "none" }}>
+                      Tạo nhanh nhiều task cùng lúc (Tự động tăng ngày theo cấu hình chung)
+                    </label>
                   </div>
 
                   <div className="form-group">
-                    <label>Tài khoản Assignee</label>
+                    <label>Tài khoản Assignee (Dùng chung)</label>
                     <UserSelect
                       users={assignableUsers}
                       value={assignee}
@@ -1052,38 +1101,150 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                     />
                   </div>
 
-                  <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
-                    <input
-                      id="checkbox-autolog"
-                      type="checkbox"
-                      checked={autoLogWork}
-                      onChange={(e) => setAutoLogWork(e.target.checked)}
-                      disabled={isRunning}
-                      style={{ width: "auto", margin: 0, cursor: "pointer" }}
-                    />
-                    <label htmlFor="checkbox-autolog" style={{ cursor: "pointer", fontWeight: "normal", fontSize: 13, userSelect: "none" }}>
-                      Tự động log work 7h cho mỗi issue sau khi tạo?
-                    </label>
-                  </div>
+                  {useGeneralConfig ? (
+                    <>
+                      <div className="form-group">
+                        <label>Danh sách tóm tắt Issue (Mỗi dòng là 1 Issue) *</label>
+                        <textarea
+                          placeholder="Ví dụ:&#10;Thiết kế giao diện trang chủ&#10;Viết API đồng bộ hóa dữ liệu"
+                          value={bulkText}
+                          onChange={(e) => setBulkText(e.target.value)}
+                          disabled={isRunning}
+                          rows={8}
+                          style={{ fontFamily: "inherit", lineHeight: "1.5" }}
+                          required
+                        />
+                      </div>
 
-                  <div className="form-group">
-                    <label htmlFor="input-start-date-log">
-                      {autoLogWork ? "Ngày bắt đầu log work *" : "Ngày bắt đầu của Task *"}
-                    </label>
-                    <input
-                      id="input-start-date-log"
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      disabled={isRunning}
-                      required
-                    />
-                  </div>
+                      <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
+                        <input
+                          id="checkbox-autolog"
+                          type="checkbox"
+                          checked={autoLogWork}
+                          onChange={(e) => setAutoLogWork(e.target.checked)}
+                          disabled={isRunning}
+                          style={{ width: "auto", margin: 0, cursor: "pointer" }}
+                        />
+                        <label htmlFor="checkbox-autolog" style={{ cursor: "pointer", fontWeight: "normal", fontSize: 13, userSelect: "none" }}>
+                          Tự động log work 7h cho mỗi issue sau khi tạo?
+                        </label>
+                      </div>
+
+                      <div className="form-group">
+                        <label htmlFor="input-start-date-log">
+                          {autoLogWork ? "Ngày bắt đầu log work *" : "Ngày bắt đầu của Task *"}
+                        </label>
+                        <input
+                          id="input-start-date-log"
+                          type="date"
+                          value={startDate}
+                          onChange={(e) => setStartDate(e.target.value)}
+                          disabled={isRunning}
+                          required
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+                      <label>Danh sách Task nhập thủ công</label>
+                      {manualRows.map((row, idx) => (
+                        <div key={row.id} style={{ display: "grid", gridTemplateColumns: "1fr 120px 120px 80px 60px 40px", gap: 8, alignItems: "center", background: "var(--bg-card)", padding: 12, borderRadius: 8, border: "1px solid var(--border)" }}>
+                          <input
+                            type="text"
+                            placeholder="Tóm tắt công việc (Summary)..."
+                            value={row.summary}
+                            onChange={(e) => {
+                              const newRows = [...manualRows];
+                              newRows[idx].summary = e.target.value;
+                              setManualRows(newRows);
+                            }}
+                            disabled={isRunning}
+                            required
+                          />
+                          <input
+                            type="date"
+                            title="Ngày Start"
+                            value={row.startDate}
+                            onChange={(e) => {
+                              const newRows = [...manualRows];
+                              newRows[idx].startDate = e.target.value;
+                              setManualRows(newRows);
+                            }}
+                            disabled={isRunning}
+                            required
+                          />
+                          <input
+                            type="date"
+                            title="Ngày End"
+                            value={row.endDate}
+                            onChange={(e) => {
+                              const newRows = [...manualRows];
+                              newRows[idx].endDate = e.target.value;
+                              setManualRows(newRows);
+                            }}
+                            disabled={isRunning}
+                            required
+                          />
+                          <input
+                            type="text"
+                            title="Estimate"
+                            placeholder="7h"
+                            value={row.estimate}
+                            onChange={(e) => {
+                              const newRows = [...manualRows];
+                              newRows[idx].estimate = e.target.value;
+                              setManualRows(newRows);
+                            }}
+                            disabled={isRunning}
+                            required
+                          />
+                          <label style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, fontSize: 11, cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              title="Auto Log Work"
+                              checked={row.autoLogWork}
+                              onChange={(e) => {
+                                const newRows = [...manualRows];
+                                newRows[idx].autoLogWork = e.target.checked;
+                                setManualRows(newRows);
+                              }}
+                              disabled={isRunning}
+                              style={{ margin: 0 }}
+                            />
+                            Log
+                          </label>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => {
+                              setManualRows(manualRows.filter((_, i) => i !== idx));
+                            }}
+                            disabled={isRunning || manualRows.length === 1}
+                            style={{ padding: 4 }}
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => {
+                          const today = new Date().toISOString().slice(0, 10);
+                          setManualRows([...manualRows, { id: Date.now().toString(), summary: "", startDate: today, endDate: today, estimate: "7h", autoLogWork: true }]);
+                        }}
+                        disabled={isRunning}
+                        style={{ alignSelf: "flex-start" }}
+                      >
+                        ➕ Thêm Task
+                      </button>
+                    </div>
+                  )}
 
                   <button
                     type="submit"
                     className="btn btn-primary"
-                    disabled={isRunning || !bulkText.trim()}
+                    disabled={isRunning || (useGeneralConfig ? !bulkText.trim() : manualRows.filter(r => r.summary.trim()).length === 0)}
                     style={{ width: "100%", padding: "12px", marginTop: 8 }}
                   >
                     {isRunning ? (
