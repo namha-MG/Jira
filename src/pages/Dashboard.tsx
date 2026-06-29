@@ -55,9 +55,7 @@ function isClosedForDashboard(issue: JiraIssue): boolean {
   const statusName = issue.fields.status?.name?.toLowerCase() || "";
   return (
     statusName.includes("close") ||
-    statusName.includes("đóng") ||
-    statusName.includes("done") ||
-    statusName.includes("hoàn thành")
+    statusName.includes("đóng")
   );
 }
 
@@ -99,6 +97,16 @@ function getIssueWorklogSeconds(
   }, 0) || 0;
 }
 
+function getTeamAssigneeKey(issue: JiraIssue): string {
+  const assignee = issue.fields.assignee;
+  return assignee?.accountId || assignee?.name || assignee?.emailAddress || "__unassigned__";
+}
+
+function getTeamAssigneeLabel(issue: JiraIssue): string {
+  const assignee = issue.fields.assignee;
+  return assignee?.displayName || assignee?.name || assignee?.emailAddress || "Unassigned";
+}
+
 export default function Dashboard() {
   const [currentUser, setCurrentUser] = useState<JiraUser | null>(null);
   const [issues, setIssues] = useState<JiraIssue[]>([]);
@@ -132,6 +140,8 @@ export default function Dashboard() {
   const [teamClosableTargets, setTeamClosableTargets] = useState<JiraIssue[]>([]);
   const [teamSelectedTargets, setTeamSelectedTargets] = useState<Set<string>>(new Set());
   const [teamLoadingTasks, setTeamLoadingTasks] = useState(false);
+  const [teamAssigneeFilter, setTeamAssigneeFilter] = useState("all");
+  const [teamSearchQuery, setTeamSearchQuery] = useState("");
 
   const [commentIssueKey, setCommentIssueKey] = useState<string | null>(null);
   const [commentText, setCommentText] = useState("");
@@ -194,7 +204,7 @@ export default function Dashboard() {
     try {
       setTeamLoadingTasks(true);
       const jql = `project = "${teamSelectedProject}" AND assignee != currentUser() ORDER BY updated DESC`;
-      const allOtherIssues = await getAllIssuesByJql(jql, 500);
+      const allOtherIssues = await getAllIssuesByJql(jql, 2000);
       
       const targets = allOtherIssues.filter((i) => {
         const statusName = i.fields.status?.name?.toLowerCase() || "";
@@ -241,16 +251,18 @@ export default function Dashboard() {
     if (!teamSelectedProject) {
       setTeamSelectedProject(localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
     }
+    setTeamAssigneeFilter("all");
+    setTeamSearchQuery("");
     setShowTeamCloseModal(true);
   };
 
   const executeTeamAutoClose = async () => {
-    if (teamSelectedTargets.size === 0) return;
+    const targetsToClose = filteredTeamClosableTargets.filter(t => teamSelectedTargets.has(t.key));
+    if (targetsToClose.length === 0) return;
     setShowTeamCloseModal(false);
 
     setTransitioning(true);
     let successCount = 0;
-    const targetsToClose = teamClosableTargets.filter(t => teamSelectedTargets.has(t.key));
 
     for (const task of targetsToClose) {
       const key = task.key;
@@ -585,15 +597,15 @@ export default function Dashboard() {
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
   const startOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const endOfPrevMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
   const selectedRange = timeRange === "all"
     ? undefined
     : {
       start: timeRange === "prevMonth" ? startOfPrevMonth : startOfMonth,
-      end: timeRange === "prevMonth"
-        ? endOfPrevMonth
-        : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999),
+      end: timeRange === "prevMonth" ? endOfPrevMonth : endOfToday,
     };
 
   // Lọc Issues theo phạm vi thời gian
@@ -654,7 +666,7 @@ export default function Dashboard() {
   if (timeRange !== "all") {
     const holidaysList = getHolidays();
     let d = new Date(timeRange === "prevMonth" ? startOfPrevMonth : startOfMonth);
-    const end = timeRange === "prevMonth" ? endOfPrevMonth : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const end = timeRange === "prevMonth" ? endOfPrevMonth : endOfMonth;
 
     while (d <= end) {
       const day = d.getDay();
@@ -753,7 +765,7 @@ export default function Dashboard() {
   const getDaysInView = useCallback(() => {
     const days: any[] = [];
     let start = startOfMonth;
-    let end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    let end = endOfMonth;
     if (timeRange === "prevMonth") {
       start = startOfPrevMonth;
       end = endOfPrevMonth;
@@ -920,6 +932,31 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
   const recentIssues = [...filteredIssues]
     .sort((a, b) => new Date(b.fields.updated).getTime() - new Date(a.fields.updated).getTime())
     .slice(0, 8);
+
+  const teamAssigneeOptions = Array.from(
+    new Map(
+      teamClosableTargets.map(issue => [
+        getTeamAssigneeKey(issue),
+        { key: getTeamAssigneeKey(issue), label: getTeamAssigneeLabel(issue) },
+      ])
+    ).values()
+  ).sort((a, b) => a.label.localeCompare(b.label));
+
+  const normalizedTeamSearch = teamSearchQuery.trim().toLowerCase();
+  const filteredTeamClosableTargets = teamClosableTargets.filter((issue) => {
+    const matchesAssignee = teamAssigneeFilter === "all" || getTeamAssigneeKey(issue) === teamAssigneeFilter;
+    const matchesSearch =
+      !normalizedTeamSearch ||
+      issue.id.toLowerCase().includes(normalizedTeamSearch) ||
+      issue.key.toLowerCase().includes(normalizedTeamSearch) ||
+      (issue.fields.summary || "").toLowerCase().includes(normalizedTeamSearch);
+
+    return matchesAssignee && matchesSearch;
+  });
+  const filteredTeamSelectedCount = filteredTeamClosableTargets.filter(t => teamSelectedTargets.has(t.key)).length;
+  const allFilteredTeamTargetsSelected =
+    filteredTeamClosableTargets.length > 0 &&
+    filteredTeamClosableTargets.every(t => teamSelectedTargets.has(t.key));
 
   if (!isConfigured) {
     return (
@@ -1126,14 +1163,18 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
         {/* Team Close Modal */}
         {showTeamCloseModal && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-            <div style={{ background: "var(--bg-secondary)", borderRadius: 16, width: 700, maxWidth: "95vw", maxHeight: "85vh", display: "flex", flexDirection: "column", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}>
+            <div style={{ background: "var(--bg-secondary)", borderRadius: 16, width: 780, maxWidth: "95vw", maxHeight: "85vh", display: "flex", flexDirection: "column", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}>
               <div style={{ padding: 20, borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <h3 style={{ margin: 0, fontSize: 18, color: "var(--text-primary)" }}>Đóng Task Team theo Dự án</h3>
                   <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
                     <select
                       value={teamSelectedProject}
-                      onChange={(e) => setTeamSelectedProject(e.target.value)}
+                      onChange={(e) => {
+                        setTeamSelectedProject(e.target.value);
+                        setTeamAssigneeFilter("all");
+                        setTeamSearchQuery("");
+                      }}
                       style={{ padding: "6px 12px", borderRadius: 6, background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)", cursor: "pointer", outline: "none", fontSize: 14 }}
                     >
                       {JIRA_PROJECTS.map(p => (
@@ -1143,6 +1184,39 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
                   </div>
                 </div>
                 <button onClick={() => setShowTeamCloseModal(false)} className="btn btn-ghost btn-sm">❌</button>
+              </div>
+
+              <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "grid", gridTemplateColumns: "minmax(180px, 240px) minmax(220px, 1fr) auto", gap: 12, alignItems: "center" }}>
+                <select
+                  value={teamAssigneeFilter}
+                  onChange={(e) => setTeamAssigneeFilter(e.target.value)}
+                  disabled={teamLoadingTasks || teamClosableTargets.length === 0}
+                  style={{ padding: "8px 12px", borderRadius: 6, background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)", cursor: "pointer", outline: "none", fontSize: 13, minWidth: 0 }}
+                  title="Lọc theo assignee"
+                >
+                  <option value="all">Tất cả assignee</option>
+                  {teamAssigneeOptions.map(option => (
+                    <option key={option.key} value={option.key}>{option.label}</option>
+                  ))}
+                </select>
+                <input
+                  value={teamSearchQuery}
+                  onChange={(e) => setTeamSearchQuery(e.target.value)}
+                  disabled={teamLoadingTasks || teamClosableTargets.length === 0}
+                  placeholder="Tìm theo ID hoặc tên ticket"
+                  style={{ padding: "8px 12px", borderRadius: 6, background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)", outline: "none", fontSize: 13, minWidth: 0 }}
+                />
+                <button
+                  className="btn btn-ghost btn-sm"
+                  disabled={teamAssigneeFilter === "all" && !teamSearchQuery}
+                  onClick={() => {
+                    setTeamAssigneeFilter("all");
+                    setTeamSearchQuery("");
+                  }}
+                  style={{ whiteSpace: "nowrap" }}
+                >
+                  Xóa lọc
+                </button>
               </div>
               
               <div style={{ padding: 20, overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1155,8 +1229,12 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
                   <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)" }}>
                     🎉 Không tìm thấy task nào của nhân viên khác (dự án {teamSelectedProject}) đang ở trạng thái Resolved và có log work cần đóng.
                   </div>
+                ) : filteredTeamClosableTargets.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)" }}>
+                    Không có task nào khớp bộ lọc hiện tại.
+                  </div>
                 ) : (
-                  teamClosableTargets.map(t => (
+                  filteredTeamClosableTargets.map(t => (
                     <label key={t.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer" }}>
                       <input
                         type="checkbox"
@@ -1190,22 +1268,31 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
                 )}
               </div>
               <div style={{ padding: 20, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)", opacity: teamClosableTargets.length === 0 ? 0.5 : 1 }}>
-                  <input
-                    type="checkbox"
-                    disabled={teamClosableTargets.length === 0}
-                    checked={teamClosableTargets.length > 0 && teamSelectedTargets.size === teamClosableTargets.length}
-                    onChange={(e) => {
-                      if (e.target.checked) setTeamSelectedTargets(new Set(teamClosableTargets.map(t => t.key)));
-                      else setTeamSelectedTargets(new Set());
-                    }}
-                  />
-                  Chọn tất cả
-                </label>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)", opacity: filteredTeamClosableTargets.length === 0 ? 0.5 : 1 }}>
+                    <input
+                      type="checkbox"
+                      disabled={filteredTeamClosableTargets.length === 0}
+                      checked={allFilteredTeamTargetsSelected}
+                      onChange={(e) => {
+                        const newSet = new Set(teamSelectedTargets);
+                        filteredTeamClosableTargets.forEach(t => {
+                          if (e.target.checked) newSet.add(t.key);
+                          else newSet.delete(t.key);
+                        });
+                        setTeamSelectedTargets(newSet);
+                      }}
+                    />
+                    Chọn tất cả kết quả lọc
+                  </label>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Đang chọn {filteredTeamSelectedCount}/{filteredTeamClosableTargets.length}
+                  </span>
+                </div>
                 <div style={{ display: "flex", gap: 12 }}>
                   <button onClick={() => setShowTeamCloseModal(false)} className="btn btn-secondary">Đóng</button>
-                  <button onClick={executeTeamAutoClose} className="btn btn-primary" disabled={teamSelectedTargets.size === 0}>
-                    Xác nhận đóng ({teamSelectedTargets.size}) task
+                  <button onClick={executeTeamAutoClose} className="btn btn-primary" disabled={filteredTeamSelectedCount === 0}>
+                    Xác nhận đóng ({filteredTeamSelectedCount}) task
                   </button>
                 </div>
               </div>
