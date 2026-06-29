@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 import {
-  getMyIssues, JiraIssue, formatSeconds, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, getCurrentUser, getAllIssuesByJql, JiraUser
+  getMyIssues, JiraIssue, JiraWorklog, formatSeconds, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, getCurrentUser, getAllIssuesByJql, getWorklogs, JiraUser
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
@@ -49,6 +49,54 @@ function getIssueLoggedSeconds(issue: JiraIssue): number {
 
 function getIssueEstimatedSeconds(issue: JiraIssue): number {
   return issue.fields.aggregatetimeoriginalestimate ?? (issue.fields.timetracking?.originalEstimateSeconds || 0);
+}
+
+function isClosedForDashboard(issue: JiraIssue): boolean {
+  const statusName = issue.fields.status?.name?.toLowerCase() || "";
+  return (
+    statusName.includes("close") ||
+    statusName.includes("đóng") ||
+    statusName.includes("done") ||
+    statusName.includes("hoàn thành")
+  );
+}
+
+function userIdentityKeys(user: JiraUser | null | undefined): string[] {
+  if (!user) return [];
+  return [user.accountId, user.name, user.emailAddress]
+    .filter((value): value is string => !!value)
+    .map(value => value.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isWorklogByUser(worklog: JiraWorklog, user: JiraUser | null): boolean {
+  if (!user) return true;
+
+  const userKeys = userIdentityKeys(user);
+  const authorKeys = userIdentityKeys(worklog.author);
+  return userKeys.some(key => authorKeys.includes(key));
+}
+
+function isDateInRange(date: Date, range?: { start: Date; end: Date }): boolean {
+  const time = date.getTime();
+  if (Number.isNaN(time)) return false;
+  if (!range) return true;
+  return time >= range.start.getTime() && time <= range.end.getTime();
+}
+
+function getIssueWorklogSeconds(
+  issue: JiraIssue,
+  currentUser: JiraUser | null,
+  range?: { start: Date; end: Date }
+): number {
+  return issue.fields.worklog?.worklogs?.reduce((sum, worklog) => {
+    if (!isWorklogByUser(worklog, currentUser)) return sum;
+
+    const worklogDate = new Date(worklog.started);
+    if (!isDateInRange(worklogDate, range)) return sum;
+
+    return sum + (worklog.timeSpentSeconds || 0);
+  }, 0) || 0;
 }
 
 export default function Dashboard() {
@@ -486,7 +534,44 @@ export default function Dashboard() {
 
       const projectKeys = JIRA_PROJECTS.map((p) => p.key);
       const result = await getMyIssues({ projectKeys, maxResults: 200 });
-      setIssues(result.issues);
+      const issuesWithFullWorklogs = [...result.issues];
+      const issuesNeedingFullWorklogs = issuesWithFullWorklogs.filter((issue) => {
+        const worklog = issue.fields.worklog;
+        return worklog && worklog.total > (worklog.worklogs?.length || 0);
+      });
+
+      const batchSize = 8;
+      for (let i = 0; i < issuesNeedingFullWorklogs.length; i += batchSize) {
+        const batch = issuesNeedingFullWorklogs.slice(i, i + batchSize);
+        const entries = await Promise.all(batch.map(async (issue) => {
+          try {
+            const worklogs = await getWorklogs(issue.key);
+            return { key: issue.key, worklogs };
+          } catch (e) {
+            console.warn(`Lỗi lấy đầy đủ worklog cho ${issue.key}`, e);
+            return { key: issue.key, worklogs: issue.fields.worklog?.worklogs || [] };
+          }
+        }));
+
+        entries.forEach(({ key, worklogs }) => {
+          const issueIndex = issuesWithFullWorklogs.findIndex(issue => issue.key === key);
+          if (issueIndex < 0) return;
+
+          const issue = issuesWithFullWorklogs[issueIndex];
+          issuesWithFullWorklogs[issueIndex] = {
+            ...issue,
+            fields: {
+              ...issue.fields,
+              worklog: {
+                total: worklogs.length,
+                worklogs,
+              },
+            },
+          };
+        });
+      }
+
+      setIssues(issuesWithFullWorklogs);
       setLastRefresh(new Date());
     } catch (err: unknown) {
       const e = err as { response?: { data?: { errorMessages?: string[] } }; message?: string };
@@ -502,6 +587,14 @@ export default function Dashboard() {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const startOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const endOfPrevMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+  const selectedRange = timeRange === "all"
+    ? undefined
+    : {
+      start: timeRange === "prevMonth" ? startOfPrevMonth : startOfMonth,
+      end: timeRange === "prevMonth"
+        ? endOfPrevMonth
+        : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999),
+    };
 
   // Lọc Issues theo phạm vi thời gian
   const filteredIssues = issues.filter((i) => {
@@ -518,22 +611,15 @@ export default function Dashboard() {
 
     if (timeRange === "all") return true;
 
-    let rangeStart = startOfMonth;
-    let rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-    if (timeRange === "prevMonth") {
-      rangeStart = startOfPrevMonth;
-      rangeEnd = endOfPrevMonth;
-    }
-
     // Giữ lại issue nếu nó được cập nhật trong khoảng thời gian này
     const updatedDate = new Date(i.fields.updated);
-    if (updatedDate >= rangeStart && updatedDate <= rangeEnd) return true;
+    if (selectedRange && isDateInRange(updatedDate, selectedRange)) return true;
 
     // Hoặc nếu nó có chứa worklog được log trong khoảng thời gian này
     const hasWorklogThisPeriod = i.fields.worklog?.worklogs?.some(
       (wl) => {
         const d = new Date(wl.started);
-        return d >= rangeStart && d <= rangeEnd;
+        return isWorklogByUser(wl, currentUser) && isDateInRange(d, selectedRange);
       }
     );
     return !!hasWorklogThisPeriod;
@@ -548,35 +634,8 @@ export default function Dashboard() {
 
   // Tính tổng thời gian đã log: chỉ tính những ticket đã được closed
   const totalLogged = filteredIssues.reduce((sum, issue) => {
-    const statusName = issue.fields.status?.name?.toLowerCase() || "";
-    if (
-      !statusName.includes("close") &&
-      !statusName.includes("đóng") &&
-      !statusName.includes("done") &&
-      !statusName.includes("hoàn thành")
-    ) {
-      return sum;
-    }
-
-    if (timeRange === "all") {
-      const hasParent = issue.fields.parent && filteredIssues.some(p => p.key === issue.fields.parent?.key);
-      if (hasParent) return sum;
-      return sum + getIssueLoggedSeconds(issue);
-    } else {
-      let rangeStart = startOfMonth;
-      let rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-      if (timeRange === "prevMonth") {
-        rangeStart = startOfPrevMonth;
-        rangeEnd = endOfPrevMonth;
-      }
-
-      const taskDateStr = issue.fields.customfield_10300 || issue.fields.duedate || issue.fields.customfield_10302;
-      const periodLogs = issue.fields.worklog?.worklogs?.reduce((s, wl) => {
-        const wlDate = taskDateStr ? new Date(taskDateStr) : new Date(wl.started);
-        return (wlDate >= rangeStart && wlDate <= rangeEnd) ? s + wl.timeSpentSeconds : s;
-      }, 0) || 0;
-      return sum + periodLogs;
-    }
+    if (!isClosedForDashboard(issue)) return sum;
+    return sum + getIssueWorklogSeconds(issue, currentUser, selectedRange);
   }, 0);
 
   const totalRemaining = filteredIssues.reduce((s, i) => {
@@ -657,23 +716,7 @@ export default function Dashboard() {
     const projIssues = filteredIssues.filter((i) => i.fields.project.key === p.key);
 
     const loggedSeconds = projIssues.reduce((sum, issue) => {
-      if (timeRange === "all") {
-        return sum + (issue.fields.timetracking?.timeSpentSeconds || 0);
-      } else {
-        let rangeStart = startOfMonth;
-        let rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-        if (timeRange === "prevMonth") {
-          rangeStart = startOfPrevMonth;
-          rangeEnd = endOfPrevMonth;
-        }
-
-        const taskDateStr = issue.fields.customfield_10300 || issue.fields.duedate || issue.fields.customfield_10302;
-        const periodLogs = issue.fields.worklog?.worklogs?.reduce((s, wl) => {
-          const wlDate = taskDateStr ? new Date(taskDateStr) : new Date(wl.started);
-          return (wlDate >= rangeStart && wlDate <= rangeEnd) ? s + wl.timeSpentSeconds : s;
-        }, 0) || 0;
-        return sum + periodLogs;
-      }
+      return sum + getIssueWorklogSeconds(issue, currentUser, selectedRange);
     }, 0);
 
     return {
@@ -740,9 +783,12 @@ export default function Dashboard() {
 
   const dailyLoggedMap: Record<string, number> = {};
   filteredIssues.forEach(issue => {
-    const taskDateStr = issue.fields.customfield_10300 || issue.fields.duedate || issue.fields.customfield_10302;
     issue.fields.worklog?.worklogs?.forEach((wl) => {
-      const wlDate = taskDateStr ? new Date(taskDateStr) : new Date(wl.started);
+      if (!isWorklogByUser(wl, currentUser)) return;
+
+      const wlDate = new Date(wl.started);
+      if (!isDateInRange(wlDate, selectedRange)) return;
+
       const y = wlDate.getFullYear();
       const m = String(wlDate.getMonth() + 1).padStart(2, '0');
       const dt = String(wlDate.getDate()).padStart(2, '0');
@@ -821,9 +867,12 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
   let lastWeekTotalSeconds = 0;
 
   issues.forEach((issue) => {
-    const taskDateStr = issue.fields.customfield_10300 || issue.fields.duedate || issue.fields.customfield_10302;
     issue.fields.worklog?.worklogs?.forEach((wl) => {
-      const wlDate = taskDateStr ? new Date(taskDateStr) : new Date(wl.started);
+      if (!isWorklogByUser(wl, currentUser)) return;
+
+      const wlDate = new Date(wl.started);
+      if (Number.isNaN(wlDate.getTime())) return;
+
       const wlTime = wlDate.getTime();
 
       // Check last week

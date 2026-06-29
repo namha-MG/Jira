@@ -248,17 +248,36 @@ export async function getMyIssues(options: {
     jql = `project in (${projectFilter}) AND (assignee = ${assigneeSelector} OR worklogAuthor = ${assigneeSelector}) ORDER BY updated DESC`;
   }
 
-  const res = await jiraApi.get("/search", {
-    params: {
-      jql,
-      maxResults,
-      fields: "summary,status,priority,assignee,timetracking,aggregatetimespent,aggregatetimeoriginalestimate,aggregateprogress,worklog,created,updated,duedate,project,issuetype,customfield_10300,customfield_10302,parent,attachment",
-    },
-  });
+  const fields = "summary,status,priority,assignee,timetracking,aggregatetimespent,aggregatetimeoriginalestimate,aggregateprogress,worklog,created,updated,duedate,project,issuetype,customfield_10300,customfield_10302,parent,attachment";
+  const pageSize = Math.min(maxResults, 100);
+  let startAt = 0;
+  let allIssues: JiraIssue[] = [];
+  let total = 0;
+
+  while (allIssues.length < maxResults) {
+    const res = await jiraApi.get("/search", {
+      params: {
+        jql,
+        maxResults: pageSize,
+        startAt,
+        fields,
+      },
+    });
+
+    const issues = res.data.issues || [];
+    total = res.data.total || 0;
+    allIssues = allIssues.concat(issues);
+
+    if (issues.length === 0 || allIssues.length >= total) {
+      break;
+    }
+
+    startAt += pageSize;
+  }
 
   return {
-    issues: res.data.issues || [],
-    total: res.data.total || 0,
+    issues: allIssues.slice(0, maxResults),
+    total,
   };
 }
 
@@ -297,8 +316,26 @@ export async function getAllIssuesByJql(
 
 /** Lấy worklogs của issue */
 export async function getWorklogs(issueKey: string): Promise<JiraWorklog[]> {
-  const res = await jiraApi.get(`/issue/${issueKey}/worklog`);
-  return res.data.worklogs;
+  const maxResults = 100;
+  let startAt = 0;
+  let allWorklogs: JiraWorklog[] = [];
+
+  while (true) {
+    const res = await jiraApi.get(`/issue/${issueKey}/worklog`, {
+      params: { startAt, maxResults },
+    });
+    const worklogs = res.data.worklogs || [];
+    allWorklogs = allWorklogs.concat(worklogs);
+
+    const total = res.data.total ?? allWorklogs.length;
+    if (worklogs.length === 0 || allWorklogs.length >= total) {
+      break;
+    }
+
+    startAt += maxResults;
+  }
+
+  return allWorklogs;
 }
 
 /** Thêm worklog vào issue */
