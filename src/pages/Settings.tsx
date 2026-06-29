@@ -39,6 +39,18 @@ export default function Settings() {
     if (savedPat) {
       testConn();
     }
+    
+    // Fetch authorized config from backend
+    fetch("/api/configs/authorized_close_team")
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.value !== null) {
+          setAuthorizedCloseTeam(data.value);
+          localStorage.setItem("authorized_close_team", data.value);
+        }
+      })
+      .catch(e => console.warn("Lỗi tải cấu hình phân quyền từ DB", e));
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -87,6 +99,17 @@ export default function Settings() {
       } catch (e) {
         console.warn("Failed to sync PAT to backend", e);
       }
+    }
+
+    // Save authorized list to backend
+    try {
+      await fetch("/api/configs/authorized_close_team", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: authorizedCloseTeam })
+      });
+    } catch (e) {
+      console.warn("Failed to sync authorized team to backend", e);
     }
 
     addToast("success", "✅ Đã lưu cài đặt");

@@ -75,6 +75,43 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
+app.get("/api/configs/:key", async (req, res) => {
+  const client = new Client({ connectionString: POSTGRES_URL });
+  try {
+    await client.connect();
+    const dbRes = await client.query("SELECT value FROM jira_app_configs WHERE key = $1", [req.params.key]);
+    if (dbRes.rowCount && dbRes.rowCount > 0) {
+      res.json({ value: dbRes.rows[0].value });
+    } else {
+      res.json({ value: null });
+    }
+  } catch (err) {
+    console.error("Error fetching config:", err);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    await client.end();
+  }
+});
+
+app.post("/api/configs/:key", async (req, res) => {
+  const { value } = req.body;
+  const client = new Client({ connectionString: POSTGRES_URL });
+  try {
+    await client.connect();
+    await client.query(`
+      INSERT INTO jira_app_configs (key, value)
+      VALUES ($1, $2)
+      ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = CURRENT_TIMESTAMP
+    `, [req.params.key, String(value || "")]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error saving config:", err);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    await client.end();
+  }
+});
+
 // JOB MONITOR APIs
 app.get("/api/jobs", async (req, res) => {
   const client = new Client({ connectionString: POSTGRES_URL });

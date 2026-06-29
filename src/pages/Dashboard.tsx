@@ -79,6 +79,12 @@ export default function Dashboard() {
   const [closableTargets, setClosableTargets] = useState<JiraIssue[]>([]);
   const [selectedTargets, setSelectedTargets] = useState<Set<string>>(new Set());
 
+  const [showTeamCloseModal, setShowTeamCloseModal] = useState(false);
+  const [teamSelectedProject, setTeamSelectedProject] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
+  const [teamClosableTargets, setTeamClosableTargets] = useState<JiraIssue[]>([]);
+  const [teamSelectedTargets, setTeamSelectedTargets] = useState<Set<string>>(new Set());
+  const [teamLoadingTasks, setTeamLoadingTasks] = useState(false);
+
   const [commentIssueKey, setCommentIssueKey] = useState<string | null>(null);
   const [commentText, setCommentText] = useState("");
   const [commentFile, setCommentFile] = useState<File | null>(null);
@@ -135,11 +141,11 @@ export default function Dashboard() {
     setShowCloseModal(true);
   };
 
-  const autoCloseOtherEmployeesTasks = async () => {
+  const fetchTeamTasks = useCallback(async () => {
+    if (!teamSelectedProject) return;
     try {
-      setLoading(true);
-      const projectKeys = JIRA_PROJECTS.map(p => `"${p.key}"`).join(",");
-      const jql = `project in (${projectKeys}) AND assignee != currentUser() AND statusCategory != Done`;
+      setTeamLoadingTasks(true);
+      const jql = `project = "${teamSelectedProject}" AND assignee != currentUser() AND statusCategory != Done`;
       const allOtherIssues = await getAllIssuesByJql(jql, 500);
       
       const targets = allOtherIssues.filter((i) => {
@@ -167,19 +173,110 @@ export default function Dashboard() {
         return est > 0 && logged >= est && remain === 0 && !isCompleted;
       });
 
-      if (targets.length === 0) {
-        alert("🎉 Không tìm thấy task nào của nhân viên khác đã log đủ thời gian cần chuyển trạng thái!");
-        return;
-      }
-
-      setClosableTargets(targets);
-      setSelectedTargets(new Set(targets.map(t => t.key)));
-      setShowCloseModal(true);
+      setTeamClosableTargets(targets);
+      setTeamSelectedTargets(new Set(targets.map(t => t.key)));
     } catch (e: any) {
-      alert("Lỗi khi tải task: " + e.message);
+      console.error("Lỗi khi tải task team:", e);
     } finally {
-      setLoading(false);
+      setTeamLoadingTasks(false);
     }
+  }, [teamSelectedProject]);
+
+  useEffect(() => {
+    if (showTeamCloseModal) {
+      fetchTeamTasks();
+    }
+  }, [showTeamCloseModal, fetchTeamTasks]);
+
+  const autoCloseOtherEmployeesTasks = () => {
+    if (!teamSelectedProject) {
+      setTeamSelectedProject(localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
+    }
+    setShowTeamCloseModal(true);
+  };
+
+  const executeTeamAutoClose = async () => {
+    if (teamSelectedTargets.size === 0) return;
+    setShowTeamCloseModal(false);
+
+    setTransitioning(true);
+    let successCount = 0;
+    const targetsToClose = teamClosableTargets.filter(t => teamSelectedTargets.has(t.key));
+
+    for (const task of targetsToClose) {
+      const key = task.key;
+      setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key}`);
+      try {
+        let transitions = await getTransitions(key);
+
+        const inprogressKeywords = ["in progress", "đang thực hiện", "đang làm", "to do", "cần làm"];
+        const resolvedKeywords = ["resolved", "done", "đã giải quyết", "hoàn thành", "ready for test", "resolved / done"];
+        const closedKeywords = ["closed", "đóng", "close"];
+
+        const currentStatusName = task.fields.status.name.toLowerCase();
+        const isAlreadyResolved = resolvedKeywords.some(kw => currentStatusName.includes(kw));
+        const isAlreadyClosed = closedKeywords.some(kw => currentStatusName.includes(kw));
+
+        if (!isAlreadyResolved && !isAlreadyClosed) {
+          const toInProgress = transitions.find(t =>
+            inprogressKeywords.includes(t.to.name.toLowerCase()) ||
+            inprogressKeywords.some(kw => t.name.toLowerCase().includes(kw))
+          );
+          if (toInProgress) {
+            setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toInProgress.to.name}`);
+            await transitionIssue(key, toInProgress.id);
+            transitions = await getTransitions(key);
+          }
+
+          const getJiraErrorMsg = (err: any) => {
+            const data = err?.response?.data;
+            if (!data) return err.message;
+            if (data.errorMessages && data.errorMessages.length > 0) return data.errorMessages[0];
+            if (data.errors) return JSON.stringify(data.errors);
+            return err.message;
+          };
+
+          const toResolved = transitions.find(t =>
+            resolvedKeywords.includes(t.to.name.toLowerCase()) ||
+            resolvedKeywords.some(kw => t.name.toLowerCase().includes(kw))
+          );
+          if (toResolved) {
+            setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toResolved.to.name}`);
+            const allFields = await getJiraFields();
+            const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
+            const transitionFields: any = { resolution: { id: "10000" } };
+            if (outputField) {
+              const aiOutput = await generateAiOutput(task.fields.summary);
+              transitionFields[outputField.id] = aiOutput;
+            }
+
+            try {
+              await transitionIssue(key, toResolved.id, transitionFields);
+            } catch (e) {
+              console.warn(`Chuyển sang Resolved với fields thất bại cho ${key}. Lỗi:`, getJiraErrorMsg(e));
+              await transitionIssue(key, toResolved.id);
+            }
+            transitions = await getTransitions(key);
+          }
+        }
+
+        const toClosed = transitions.find(t =>
+          closedKeywords.includes(t.to.name.toLowerCase()) ||
+          closedKeywords.some(kw => t.name.toLowerCase().includes(kw))
+        );
+        if (toClosed) {
+          setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toClosed.to.name}`);
+          await transitionIssue(key, toClosed.id);
+        }
+
+        successCount++;
+      } catch (err: any) {
+        console.warn(`Lỗi khi xử lý ${key}`, err);
+      }
+    }
+    
+    setTransitioning(false);
+    setTransitionStatus("");
   };
 
   const executeAutoClose = async () => {
@@ -372,6 +469,16 @@ export default function Dashboard() {
       try {
         const user = await getCurrentUser();
         setCurrentUser(user);
+        
+        // Fetch config from DB to sync locally
+        fetch("/api/configs/authorized_close_team")
+          .then(r => r.json())
+          .then(data => {
+            if (data && data.value !== null) {
+              localStorage.setItem("authorized_close_team", data.value);
+            }
+          })
+          .catch(e => console.warn("Lỗi đồng bộ phân quyền từ DB", e));
       } catch (e) {
         console.warn("Lỗi lấy thông tin user", e);
       }
@@ -959,6 +1066,96 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
                   <button onClick={() => setShowCloseModal(false)} className="btn btn-secondary">Hủy</button>
                   <button onClick={executeAutoClose} className="btn btn-primary" disabled={selectedTargets.size === 0}>
                     Xác nhận đóng ({selectedTargets.size}) task
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Team Close Modal */}
+        {showTeamCloseModal && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+            <div style={{ background: "var(--bg-secondary)", borderRadius: 16, width: 700, maxWidth: "95vw", maxHeight: "85vh", display: "flex", flexDirection: "column", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}>
+              <div style={{ padding: 20, borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 18, color: "var(--text-primary)" }}>Đóng Task Team theo Dự án</h3>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+                    <select
+                      value={teamSelectedProject}
+                      onChange={(e) => setTeamSelectedProject(e.target.value)}
+                      style={{ padding: "6px 12px", borderRadius: 6, background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)", cursor: "pointer", outline: "none", fontSize: 14 }}
+                    >
+                      {JIRA_PROJECTS.map(p => (
+                        <option key={p.key} value={p.key}>{p.name} ({p.key})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <button onClick={() => setShowTeamCloseModal(false)} className="btn btn-ghost btn-sm">❌</button>
+              </div>
+              
+              <div style={{ padding: 20, overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
+                {teamLoadingTasks ? (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40, color: "var(--text-secondary)" }}>
+                    <div className="spinning" style={{ fontSize: 32, marginBottom: 12 }}>⏳</div>
+                    Đang tìm các task đủ giờ của dự án {teamSelectedProject}...
+                  </div>
+                ) : teamClosableTargets.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)" }}>
+                    🎉 Không tìm thấy task nào của nhân viên khác (dự án {teamSelectedProject}) đã log đủ thời gian cần chuyển trạng thái.
+                  </div>
+                ) : (
+                  teamClosableTargets.map(t => (
+                    <label key={t.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        style={{ width: 18, height: 18, cursor: "pointer", flexShrink: 0 }}
+                        checked={teamSelectedTargets.has(t.key)}
+                        onChange={(e) => {
+                          const newSet = new Set(teamSelectedTargets);
+                          if (e.target.checked) newSet.add(t.key);
+                          else newSet.delete(t.key);
+                          setTeamSelectedTargets(newSet);
+                        }}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                          <span style={{ color: "var(--accent-blue-light)", fontWeight: 600, fontSize: 13 }}>{t.key}</span>
+                          <span className={getBadgeClass(t.fields.status.name)} style={{ fontSize: 10, padding: "2px 6px" }}>{t.fields.status.name}</span>
+                          <span style={{ fontSize: 11, background: "var(--bg-primary)", padding: "2px 8px", borderRadius: 10, border: "1px solid var(--border)" }}>
+                            👤 {t.fields.assignee?.displayName || t.fields.assignee?.name || "Unassigned"}
+                          </span>
+                        </div>
+                        <div style={{ color: "var(--text-primary)", fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginBottom: 6 }}>
+                          {t.fields.summary}
+                        </div>
+                        <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--text-secondary)" }}>
+                          <span>⏱️ Đã log: <strong style={{ color: "var(--accent-green)" }}>{formatSeconds(t.fields.timetracking?.timeSpentSeconds || 0)}</strong></span>
+                          <span>⏳ Estimate: <strong>{formatSeconds(t.fields.timetracking?.originalEstimateSeconds || 0)}</strong></span>
+                        </div>
+                      </div>
+                    </label>
+                  ))
+                )}
+              </div>
+              <div style={{ padding: 20, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", color: "var(--text-secondary)", opacity: teamClosableTargets.length === 0 ? 0.5 : 1 }}>
+                  <input
+                    type="checkbox"
+                    disabled={teamClosableTargets.length === 0}
+                    checked={teamClosableTargets.length > 0 && teamSelectedTargets.size === teamClosableTargets.length}
+                    onChange={(e) => {
+                      if (e.target.checked) setTeamSelectedTargets(new Set(teamClosableTargets.map(t => t.key)));
+                      else setTeamSelectedTargets(new Set());
+                    }}
+                  />
+                  Chọn tất cả
+                </label>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button onClick={() => setShowTeamCloseModal(false)} className="btn btn-secondary">Đóng</button>
+                  <button onClick={executeTeamAutoClose} className="btn btn-primary" disabled={teamSelectedTargets.size === 0}>
+                    Xác nhận đóng ({teamSelectedTargets.size}) task
                   </button>
                 </div>
               </div>
