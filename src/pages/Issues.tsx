@@ -545,14 +545,23 @@ export default function Issues() {
               </div>
               {typeDropdownOpen && (
                 <div style={{ 
-                  position: "absolute", top: "100%", left: 0, right: 0, background: "var(--bg-secondary)", 
+                  position: "absolute", top: "100%", left: 0, minWidth: "100%", background: "var(--bg-secondary)", 
                   border: "1px solid var(--border)", borderRadius: 6, marginTop: 4, zIndex: 50, 
-                  boxShadow: "var(--shadow-lg)", maxHeight: 200, overflowY: "auto", padding: 8, display: "flex", flexDirection: "column", gap: 4
+                  boxShadow: "var(--shadow-lg)", maxHeight: 250, overflowY: "auto", padding: 6, display: "flex", flexDirection: "column", gap: 2
                 }}>
                   {uniqueTypes.map((t) => (
-                    <label key={t as string} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}>
+                    <label 
+                      key={t as string} 
+                      style={{ 
+                        display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13,
+                        padding: "6px 8px", borderRadius: 4, width: "100%", transition: "background 0.2s"
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)"}
+                      onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                    >
                       <input 
                         type="checkbox" 
+                        style={{ margin: 0, cursor: "pointer" }}
                         checked={typeFilter.includes(t as string)}
                         onChange={(e) => {
                           if (e.target.checked) {
@@ -562,13 +571,13 @@ export default function Issues() {
                           }
                         }}
                       />
-                      {t as string}
+                      <span style={{ whiteSpace: "nowrap" }}>{t as string}</span>
                     </label>
                   ))}
                   {uniqueTypes.length > 0 && (
-                     <div style={{ marginTop: 4, borderTop: "1px solid var(--border)", paddingTop: 4, display: "flex", justifyContent: "space-between" }}>
-                       <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: "2px 6px" }} onClick={() => setTypeFilter([])}>Bỏ chọn tất cả</button>
-                       <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: "2px 6px" }} onClick={() => setTypeDropdownOpen(false)}>Đóng</button>
+                     <div style={{ marginTop: 6, borderTop: "1px solid var(--border)", paddingTop: 6, display: "flex", justifyContent: "space-between", gap: 8 }}>
+                       <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: "4px 8px", flex: 1 }} onClick={() => setTypeFilter([])}>Bỏ chọn tất cả</button>
+                       <button className="btn btn-primary btn-sm" style={{ fontSize: 11, padding: "4px 8px", flex: 1 }} onClick={() => setTypeDropdownOpen(false)}>Đóng</button>
                      </div>
                   )}
                 </div>
@@ -692,7 +701,7 @@ export default function Issues() {
                         </a>
                       </td>
                       <td style={{ maxWidth: 280 }}>
-                        <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)", fontSize: 13 }}>
+                        <div title={issue.fields.summary} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)", fontSize: 13 }}>
                           {issue.fields.summary}
                         </div>
                       </td>
