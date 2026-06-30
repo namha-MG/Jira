@@ -8,6 +8,7 @@ import {
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
+import UserSelect from "../components/UserSelect";
 import { getHolidays } from "../utils";
 
 interface ProjectStat {
@@ -1312,21 +1313,20 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
               </div>
 
               <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "grid", gridTemplateColumns: "minmax(180px, 240px) minmax(220px, 1fr) auto", gap: 12, alignItems: "center" }}>
-                <select
-                  value={teamAssigneeFilter}
-                  onChange={(e) => {
-                    setTeamAssigneeFilter(e.target.value);
-                    setTeamPage(0);
-                  }}
-                  disabled={teamLoadingTasks || teamAssigneeOptions.length === 0}
-                  style={{ padding: "8px 12px", borderRadius: 6, background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)", cursor: "pointer", outline: "none", fontSize: 13, minWidth: 0 }}
-                  title="Lọc theo assignee"
-                >
-                  <option value="all">{teamLoadingAssignees ? "Đang tải assignee..." : "Tất cả assignee"}</option>
-                  {teamAssigneeOptions.map(option => (
-                    <option key={option.key} value={option.key}>{option.label}</option>
-                  ))}
-                </select>
+                <div style={{ minWidth: 0 }}>
+                  <UserSelect
+                    users={[
+                      { accountId: "all", displayName: teamLoadingAssignees ? "Đang tải assignee..." : "Tất cả assignee", name: "all" } as JiraUser,
+                      ...teamAssigneeOptions.map(opt => ({ accountId: opt.key, displayName: opt.label, name: opt.key } as JiraUser))
+                    ]}
+                    value={teamAssigneeFilter}
+                    onChange={(val) => {
+                      setTeamAssigneeFilter(val || "all");
+                      setTeamPage(0);
+                    }}
+                    disabled={teamLoadingTasks || teamAssigneeOptions.length === 0}
+                  />
+                </div>
                 <input
                   value={teamSearchQuery}
                   onChange={(e) => setTeamSearchQuery(e.target.value)}

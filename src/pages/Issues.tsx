@@ -32,7 +32,8 @@ export default function Issues() {
   const [error, setError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [typeFilter, setTypeFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState<string[]>([]);
+  const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const [assigneeFilter, setAssigneeFilter] = useState("all");
   const [selectedIssue, setSelectedIssue] = useState<JiraIssue | null>(null);
   const [worklogs, setWorklogs] = useState<JiraWorklog[]>([]);
@@ -356,7 +357,7 @@ export default function Issues() {
         }
       }
 
-      const matchType = typeFilter === "all" || i.fields.issuetype?.name === typeFilter;
+      const matchType = typeFilter.length === 0 || (i.fields.issuetype?.name && typeFilter.includes(i.fields.issuetype.name));
 
       return matchText && matchStatus && matchTime && matchAssignee && matchAdvanced && matchType;
     })
@@ -528,15 +529,51 @@ export default function Issues() {
               <option value="all">Tất cả status</option>
               {uniqueStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
-            <select
-              id="select-type-filter"
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              style={{ width: 140 }}
-            >
-              <option value="all">Tất cả loại task</option>
-              {uniqueTypes.map((t) => <option key={t as string} value={t as string}>{t}</option>)}
-            </select>
+            <div style={{ position: "relative", width: 180 }}>
+              <div 
+                onClick={() => setTypeDropdownOpen(!typeDropdownOpen)}
+                style={{ 
+                  width: "100%", padding: "8px 12px", borderRadius: 6, background: "var(--bg-primary)", 
+                  border: "1px solid var(--border)", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center",
+                  fontSize: 13, height: "100%"
+                }}
+              >
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {typeFilter.length === 0 ? "Tất cả loại task" : `Đã chọn (${typeFilter.length})`}
+                </span>
+                <span>▼</span>
+              </div>
+              {typeDropdownOpen && (
+                <div style={{ 
+                  position: "absolute", top: "100%", left: 0, right: 0, background: "var(--bg-secondary)", 
+                  border: "1px solid var(--border)", borderRadius: 6, marginTop: 4, zIndex: 50, 
+                  boxShadow: "var(--shadow-lg)", maxHeight: 200, overflowY: "auto", padding: 8, display: "flex", flexDirection: "column", gap: 4
+                }}>
+                  {uniqueTypes.map((t) => (
+                    <label key={t as string} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}>
+                      <input 
+                        type="checkbox" 
+                        checked={typeFilter.includes(t as string)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setTypeFilter([...typeFilter, t as string]);
+                          } else {
+                            setTypeFilter(typeFilter.filter(item => item !== t));
+                          }
+                        }}
+                      />
+                      {t as string}
+                    </label>
+                  ))}
+                  {uniqueTypes.length > 0 && (
+                     <div style={{ marginTop: 4, borderTop: "1px solid var(--border)", paddingTop: 4, display: "flex", justifyContent: "space-between" }}>
+                       <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: "2px 6px" }} onClick={() => setTypeFilter([])}>Bỏ chọn tất cả</button>
+                       <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: "2px 6px" }} onClick={() => setTypeDropdownOpen(false)}>Đóng</button>
+                     </div>
+                  )}
+                </div>
+              )}
+            </div>
             <div style={{ width: 150 }}>
               <UserSelect
                 users={[
