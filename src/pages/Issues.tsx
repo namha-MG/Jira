@@ -541,51 +541,77 @@ export default function Issues() {
                 onClick={() => setTypeDropdownOpen(!typeDropdownOpen)}
                 style={{ 
                   width: "100%", padding: "8px 12px", borderRadius: 6, background: "var(--bg-primary)", 
-                  border: "1px solid var(--border)", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center",
-                  fontSize: 13, height: "100%"
+                  border: `1px solid ${typeFilter.length > 0 ? "var(--accent-blue)" : "var(--border)"}`,
+                  cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center",
+                  fontSize: 13, height: "100%", userSelect: "none",
+                  color: typeFilter.length > 0 ? "var(--accent-blue)" : "var(--text-primary)"
                 }}
               >
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {typeFilter.length === 0 ? "Tất cả loại task" : `Đã chọn (${typeFilter.length})`}
+                  {typeFilter.length === 0 ? "Tất cả loại task" : `${typeFilter.length} loại đã chọn`}
                 </span>
-                <span>▼</span>
+                <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.7 }}>{typeDropdownOpen ? "▲" : "▼"}</span>
               </div>
               {typeDropdownOpen && (
                 <div style={{ 
-                  position: "absolute", top: "100%", left: 0, minWidth: "100%", background: "var(--bg-secondary)", 
-                  border: "1px solid var(--border)", borderRadius: 6, marginTop: 4, zIndex: 50, 
-                  boxShadow: "var(--shadow-lg)", maxHeight: 250, overflowY: "auto", padding: 6, display: "flex", flexDirection: "column", gap: 2
+                  position: "absolute", top: "calc(100% + 4px)", left: 0, minWidth: "100%", 
+                  background: "var(--bg-elevated, var(--bg-secondary))", 
+                  border: "1px solid var(--border)", borderRadius: 8, zIndex: 100, 
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.4)", overflow: "hidden"
                 }}>
-                  {uniqueTypes.map((t) => (
-                    <label 
-                      key={t as string} 
-                      style={{ 
-                        display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13,
-                        padding: "6px 8px", borderRadius: 4, width: "100%", transition: "background 0.2s"
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)"}
-                      onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
-                    >
-                      <input 
-                        type="checkbox" 
-                        style={{ margin: 0, cursor: "pointer" }}
-                        checked={typeFilter.includes(t as string)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setTypeFilter([...typeFilter, t as string]);
-                          } else {
-                            setTypeFilter(typeFilter.filter(item => item !== t));
-                          }
-                        }}
-                      />
-                      <span style={{ whiteSpace: "nowrap" }}>{t as string}</span>
-                    </label>
-                  ))}
+                  <div style={{ padding: "6px 4px", maxHeight: 240, overflowY: "auto" }}>
+                    {uniqueTypes.map((t) => {
+                      const checked = typeFilter.includes(t as string);
+                      return (
+                        <div
+                          key={t as string}
+                          onClick={() => {
+                            if (checked) {
+                              setTypeFilter(typeFilter.filter(item => item !== t));
+                            } else {
+                              setTypeFilter([...typeFilter, t as string]);
+                            }
+                          }}
+                          style={{ 
+                            display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13,
+                            padding: "7px 10px", borderRadius: 6, transition: "background 0.15s",
+                            background: checked ? "rgba(79,142,247,0.12)" : "transparent",
+                            color: checked ? "var(--accent-blue)" : "var(--text-primary)"
+                          }}
+                          onMouseEnter={(e) => { if (!checked) e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = checked ? "rgba(79,142,247,0.12)" : "transparent"; }}
+                        >
+                          <div style={{
+                            width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                            border: `2px solid ${checked ? "var(--accent-blue)" : "var(--border)"}`,
+                            background: checked ? "var(--accent-blue)" : "transparent",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            transition: "all 0.15s"
+                          }}>
+                            {checked && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>✓</span>}
+                          </div>
+                          <span style={{ whiteSpace: "nowrap" }}>{t as string}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                   {uniqueTypes.length > 0 && (
-                     <div style={{ marginTop: 6, borderTop: "1px solid var(--border)", paddingTop: 6, display: "flex", justifyContent: "space-between", gap: 8 }}>
-                       <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: "4px 8px", flex: 1 }} onClick={() => setTypeFilter([])}>Bỏ chọn tất cả</button>
-                       <button className="btn btn-primary btn-sm" style={{ fontSize: 11, padding: "4px 8px", flex: 1 }} onClick={() => setTypeDropdownOpen(false)}>Đóng</button>
-                     </div>
+                    <div style={{ padding: "8px 10px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", gap: 8, background: "rgba(0,0,0,0.1)" }}>
+                      <button 
+                        className="btn btn-ghost btn-sm" 
+                        style={{ fontSize: 11, padding: "4px 8px", flex: 1, opacity: typeFilter.length === 0 ? 0.4 : 1 }} 
+                        onClick={(e) => { e.stopPropagation(); setTypeFilter([]); }}
+                      >
+                        Bỏ chọn tất cả
+                      </button>
+                      <button 
+                        className="btn btn-primary btn-sm" 
+                        style={{ fontSize: 11, padding: "4px 8px", flex: 1 }} 
+                        onClick={(e) => { e.stopPropagation(); setTypeDropdownOpen(false); }}
+                      >
+                        Xong
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
