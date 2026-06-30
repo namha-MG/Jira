@@ -671,22 +671,57 @@ export async function getJiraFields(): Promise<any[]> {
 
 /** Thực hiện chuyển đổi trạng thái (Transition) cho một Issue */
 export async function transitionIssue(issueKey: string, transitionId: string, transitionFields?: any, comment?: string): Promise<void> {
-  const payload: any = {
-    transition: { id: transitionId },
-  };
-  if (transitionFields) {
-    payload.fields = transitionFields;
-  }
-  if (comment) {
-    payload.update = {
-      comment: [
-        {
-          add: { body: comment }
-        }
-      ]
+  const buildPayload = (fields?: any) => {
+    const payload: any = {
+      transition: { id: transitionId },
     };
+    if (fields) {
+      payload.fields = fields;
+    }
+    if (comment) {
+      payload.update = {
+        comment: [
+          {
+            add: { body: comment }
+          }
+        ]
+      };
+    }
+    return payload;
+  };
+
+  try {
+    await jiraApi.post(`/issue/${issueKey}/transitions`, buildPayload(transitionFields));
+  } catch (err: any) {
+    const errors = err?.response?.data?.errors || {};
+    const requiresOutput = !!errors.customfield_10304;
+    const alreadySentOutput = !!transitionFields?.customfield_10304;
+
+    if (requiresOutput && !alreadySentOutput) {
+      await jiraApi.post(`/issue/${issueKey}/transitions`, buildPayload({
+        ...(transitionFields || {}),
+        customfield_10304: "Hoàn thành công việc",
+      }));
+      return;
+    }
+
+    throw err;
   }
-  await jiraApi.post(`/issue/${issueKey}/transitions`, payload);
+}
+
+/** Thực hiện chuyển đổi trạng thái với Output cụ thể */
+export async function transitionIssueWithOutput(
+  issueKey: string,
+  transitionId: string,
+  output: string,
+  transitionFields?: any,
+  comment?: string
+): Promise<void> {
+  const fields = {
+    ...(transitionFields || {}),
+    customfield_10304: output || "Hoàn thành công việc",
+  };
+  await transitionIssue(issueKey, transitionId, fields, comment);
 }
 
 /** Tự động sinh Output bằng AI */
