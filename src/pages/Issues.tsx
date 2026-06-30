@@ -5,6 +5,7 @@ import {
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
 import UserSelect from "../components/UserSelect";
+import { jobStore } from "../stores/jobStore";
 
 function normalizeText(str?: string) {
   if (!str) return "";
@@ -76,6 +77,13 @@ export default function Issues() {
   const [newEstimate, setNewEstimate] = useState("");
   const [updatingEstimate, setUpdatingEstimate] = useState(false);
 
+  // Status transition states
+  const [statusTransitionModalOpen, setStatusTransitionModalOpen] = useState<JiraIssue | null>(null);
+  const [availableTransitions, setAvailableTransitions] = useState<any[]>([]);
+  const [selectedTransition, setSelectedTransition] = useState<string>("");
+  const [statusTransitionLoading, setStatusTransitionLoading] = useState(false);
+  const [statusTransitioning, setStatusTransitioning] = useState(false);
+
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
 
   useEffect(() => {
@@ -143,6 +151,14 @@ export default function Issues() {
 
   useEffect(() => { fetchIssues(); }, [fetchIssues]);
 
+  useEffect(() => {
+    const unsubscribe = jobStore.on("REFRESH_ISSUES", () => {
+      fetchIssues();
+      // Optionally could refresh selectedIssue here if we had its key easily, but fetchIssues will at least update the list.
+    });
+    return unsubscribe;
+  }, [fetchIssues]);
+
   const openDetail = async (issue: JiraIssue) => {
     setSelectedIssue(issue);
     setWorklogs([]);
@@ -184,67 +200,59 @@ export default function Issues() {
     const status = issue.fields.status.name.toLowerCase();
     
     if (status === "open" || status === "mở") {
-      try {
-        setResolvingIssue(true);
-        const transitions = await getTransitions(issue.key);
-        const toInProgress = transitions.find(t => 
-          t.to.name.toLowerCase() === "in progress" || 
-          t.to.name.toLowerCase() === "đang thực hiện"
-        );
-        if (toInProgress) {
-          await transitionIssue(issue.key, toInProgress.id);
-          fetchIssues();
-          
-          if (selectedIssue && (selectedIssue.key === issue.key || selectedIssue.fields.subtasks?.some(s => s.key === issue.key))) {
-             const freshIssue = await getIssue(selectedIssue.key);
-             setSelectedIssue(freshIssue);
+      const jobId = jobStore.addJob({ type: "Cập nhật", title: `Chuyển In Progress: ${issue.key}` });
+      (async () => {
+        try {
+          const transitions = await getTransitions(issue.key);
+          const toInProgress = transitions.find(t => 
+            t.to.name.toLowerCase() === "in progress" || 
+            t.to.name.toLowerCase() === "đang thực hiện"
+          );
+          if (toInProgress) {
+            await transitionIssue(issue.key, toInProgress.id);
+            jobStore.updateJobStatus(jobId, "success");
+            jobStore.emit("REFRESH_ISSUES");
+          } else {
+            jobStore.updateJobStatus(jobId, "error", `Không tìm thấy transition In Progress cho task ${issue.key}`);
           }
-        } else {
-          alert(`Không tìm thấy transition sang In Progress cho task ${issue.key}`);
+        } catch (e: any) {
+          jobStore.updateJobStatus(jobId, "error", e.message || "Lỗi khi chuyển trạng thái");
         }
-      } catch (e: any) {
-        alert("Lỗi khi chuyển trạng thái: " + (e.message || "Unknown error"));
-      } finally {
-        setResolvingIssue(false);
-      }
+      })();
     } else if (status === "in progress" || status === "đang thực hiện" || status === "đang làm") {
       setResolveModalOpen(issue as JiraIssue);
       setResolveResolution("10000");
       setResolveOutput("");
       setResolveComment("");
     } else if (status === "fixed" || status === "resolved" || status === "done" || status === "hoàn thành") {
-      try {
-        setResolvingIssue(true);
-        let newTransitions = await getTransitions(issue.key);
-        let toCommit = newTransitions.find(t => t.to.name.toLowerCase().includes("commit") || t.name.toLowerCase().includes("commit"));
-        if (toCommit) {
-          await transitionIssue(issue.key, toCommit.id);
-          newTransitions = await getTransitions(issue.key);
-        }
-        
-        // Nếu là UAT bug thì chuyển sang UAT
-        const isUatBug = issue.fields.issuetype?.name?.toLowerCase() === "uat bug";
-        if (isUatBug) {
-          let toUat = newTransitions.find(t => t.to.name.toLowerCase().includes("uat") || t.name.toLowerCase().includes("uat"));
-          if (toUat) {
-            await transitionIssue(issue.key, toUat.id);
+      const jobId = jobStore.addJob({ type: "Cập nhật", title: `Đóng task: ${issue.key}` });
+      (async () => {
+        try {
+          let newTransitions = await getTransitions(issue.key);
+          let toCommit = newTransitions.find(t => t.to.name.toLowerCase().includes("commit") || t.name.toLowerCase().includes("commit"));
+          if (toCommit) {
+            await transitionIssue(issue.key, toCommit.id);
             newTransitions = await getTransitions(issue.key);
           }
+          
+          const isUatBug = issue.fields.issuetype?.name?.toLowerCase() === "uat bug";
+          if (isUatBug) {
+            let toUat = newTransitions.find(t => t.to.name.toLowerCase().includes("uat") || t.name.toLowerCase().includes("uat"));
+            if (toUat) {
+              await transitionIssue(issue.key, toUat.id);
+              newTransitions = await getTransitions(issue.key);
+            }
+          }
+          let toClosed = newTransitions.find(t => t.to.name.toLowerCase() === "closed" || t.to.name.toLowerCase() === "đóng" || t.name.toLowerCase().includes("close"));
+          if (toClosed) {
+            await transitionIssue(issue.key, toClosed.id);
+          }
+          jobStore.updateJobStatus(jobId, "success");
+          jobStore.emit("REFRESH_ISSUES");
+        } catch (e: any) {
+          jobStore.updateJobStatus(jobId, "error", e.message || "Lỗi khi chuyển trạng thái");
         }
-        let toClosed = newTransitions.find(t => t.to.name.toLowerCase() === "closed" || t.to.name.toLowerCase() === "đóng" || t.name.toLowerCase().includes("close"));
-        if (toClosed) {
-          await transitionIssue(issue.key, toClosed.id);
-        }
-        fetchIssues();
-        if (selectedIssue && (selectedIssue.key === issue.key || selectedIssue.fields.subtasks?.some(s => s.key === issue.key))) {
-           const freshIssue = await getIssue(selectedIssue.key);
-           setSelectedIssue(freshIssue);
-        }
-      } catch (e: any) {
-        alert("Lỗi khi chuyển trạng thái: " + (e.message || "Unknown error"));
-      } finally {
-        setResolvingIssue(false);
-      }
+      })();
     } else {
       alert("Tính năng này chỉ hỗ trợ chuyển từ Open -> In Progress -> Fixed -> Commit -> Closed");
     }
@@ -257,54 +265,53 @@ export default function Issues() {
       return;
     }
     
-    setIsSubmittingComment(true);
-    try {
-      let finalCommentText = commentText;
-      
-      if (commentFile) {
-        const uploadRes = await uploadAttachment(commentIssueKey, commentFile);
-        const filename = uploadRes && uploadRes.length > 0 && uploadRes[0].filename 
-                         ? uploadRes[0].filename 
-                         : commentFile.name;
-        finalCommentText += `\n\n!${filename}!`;
+    const issueKey = commentIssueKey;
+    const text = commentText;
+    const file = commentFile;
+    
+    setCommentIssueKey(null);
+    setCommentText("");
+    setCommentFile(null);
+    const jobId = jobStore.addJob({ type: "Bình luận", title: `Thêm comment cho ${issueKey}` });
+
+    (async () => {
+      try {
+        let finalCommentText = text;
+        
+        if (file) {
+          const uploadRes = await uploadAttachment(issueKey, file);
+          const filename = uploadRes && uploadRes.length > 0 && uploadRes[0].filename 
+                           ? uploadRes[0].filename 
+                           : file.name;
+          finalCommentText += `\n\n!${filename}!`;
+        }
+        
+        await addComment(issueKey, finalCommentText);
+        jobStore.updateJobStatus(jobId, "success");
+        jobStore.emit("REFRESH_ISSUES");
+      } catch (e: any) {
+        console.error("Failed to add comment:", e);
+        jobStore.updateJobStatus(jobId, "error", e.response?.data?.errorMessages?.[0] || e.message);
       }
-      
-      await addComment(commentIssueKey, finalCommentText);
-      alert("Đã thêm comment thành công!");
-      setCommentIssueKey(null);
-      setCommentText("");
-      setCommentFile(null);
-      
-      if (selectedIssue && (selectedIssue.key === commentIssueKey || selectedIssue.fields.subtasks?.some(s => s.key === commentIssueKey))) {
-         const freshIssue = await getIssue(selectedIssue.key);
-         setSelectedIssue(freshIssue);
-      }
-    } catch (e: any) {
-      console.error("Failed to add comment:", e);
-      alert("Lỗi khi thêm comment: " + (e.response?.data?.errorMessages?.[0] || e.message));
-    } finally {
-      setIsSubmittingComment(false);
-    }
+    })();
   };
 
   const handleEstimateSubmit = async () => {
     if (!estimateModalOpen) return;
-    try {
-      setUpdatingEstimate(true);
-      await updateIssueEstimate(estimateModalOpen.key, newEstimate);
-      alert("Cập nhật estimate thành công!");
-      setEstimateModalOpen(null);
-      fetchIssues(); // Refresh list
-      
-      if (selectedIssue && (selectedIssue.key === estimateModalOpen.key || selectedIssue.fields.subtasks?.some(s => s.key === estimateModalOpen.key))) {
-         const freshIssue = await getIssue(selectedIssue.key);
-         setSelectedIssue(freshIssue);
+    const issueKey = estimateModalOpen.key;
+    const estimateValue = newEstimate;
+    setEstimateModalOpen(null);
+    const jobId = jobStore.addJob({ type: "Cập nhật", title: `Sửa estimate cho ${issueKey}` });
+
+    (async () => {
+      try {
+        await updateIssueEstimate(issueKey, estimateValue);
+        jobStore.updateJobStatus(jobId, "success");
+        jobStore.emit("REFRESH_ISSUES");
+      } catch (e: any) {
+        jobStore.updateJobStatus(jobId, "error", e.response?.data?.errorMessages?.[0] || e.message);
       }
-    } catch (e: any) {
-      alert("Lỗi khi cập nhật estimate: " + (e.response?.data?.errorMessages?.[0] || e.message));
-    } finally {
-      setUpdatingEstimate(false);
-    }
+    })();
   };
 
   const now = new Date();
@@ -815,6 +822,32 @@ export default function Issues() {
                               ✓ Resolved
                             </button>
                         )}
+                        {!isBugTask(issue.fields.issuetype?.name) && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              style={{ color: "var(--accent-orange)", marginLeft: 4 }}
+                              onClick={async () => {
+                                setStatusTransitionModalOpen(issue);
+                                setStatusTransitionLoading(true);
+                                try {
+                                  const transitions = await getTransitions(issue.key);
+                                  setAvailableTransitions(transitions);
+                                  if (transitions.length > 0) {
+                                    setSelectedTransition(transitions[0].id);
+                                  } else {
+                                    setSelectedTransition("");
+                                  }
+                                } catch (e) {
+                                  alert("Không thể tải danh sách status");
+                                } finally {
+                                  setStatusTransitionLoading(false);
+                                }
+                              }}
+                              title="Đổi Status"
+                            >
+                              🔄 Status
+                            </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -1194,31 +1227,34 @@ export default function Issues() {
                   const validTasks = subTasks.filter(st => st.summary.trim());
                   if (validTasks.length === 0) return;
                   
-                  setCreatingSubTask(true);
-                  try {
-                    // Create sequentially to avoid overwhelming Jira API
-                    for (const st of validTasks) {
-                      await createSubTask({
-                        parentKey: subTaskModalOpen.key,
-                        projectKey: subTaskModalOpen.fields.project.key,
-                        summary: st.summary.trim(),
-                        originalEstimate: st.estimate.trim() || undefined,
-                        assigneeName: st.assigneeName || undefined
-                      });
+                  const parentKey = subTaskModalOpen.key;
+                  const projectKey = subTaskModalOpen.fields.project.key;
+                  setSubTaskModalOpen(null);
+                  const jobId = jobStore.addJob({ type: "Tạo Task", title: `Tạo ${validTasks.length} sub-tasks cho ${parentKey}` });
+                  
+                  (async () => {
+                    try {
+                      for (const st of validTasks) {
+                        await createSubTask({
+                          parentKey,
+                          projectKey,
+                          summary: st.summary.trim(),
+                          originalEstimate: st.estimate.trim() || undefined,
+                          assigneeName: st.assigneeName || undefined
+                        });
+                      }
+                      jobStore.updateJobStatus(jobId, "success");
+                      jobStore.emit("REFRESH_ISSUES");
+                    } catch (e: any) {
+                      let msg = e.message || "Unknown error";
+                      if (e.response?.data?.errorMessages?.length) {
+                        msg = e.response.data.errorMessages[0];
+                      } else if (e.response?.data?.errors) {
+                        msg = Object.values(e.response.data.errors).join(", ");
+                      }
+                      jobStore.updateJobStatus(jobId, "error", msg);
                     }
-                    setSubTaskModalOpen(null);
-                    fetchIssues(); // Refresh list
-                  } catch (e: any) {
-                    let msg = e.message || "Unknown error";
-                    if (e.response?.data?.errorMessages?.length) {
-                      msg = e.response.data.errorMessages[0];
-                    } else if (e.response?.data?.errors) {
-                      msg = Object.values(e.response.data.errors).join(", ");
-                    }
-                    alert("Lỗi khi tạo sub-task: " + msg);
-                  } finally {
-                    setCreatingSubTask(false);
-                  }
+                  })();
                 }}
               >
                 {creatingSubTask ? "Đang tạo..." : `Tạo ${subTasks.filter(st => st.summary.trim()).length} Sub-task`}
@@ -1264,7 +1300,6 @@ export default function Issues() {
                 disabled={!logWorkTime.trim() || loggingWork}
                 onClick={async () => {
                   try {
-                    setLoggingWork(true);
                     const timeRegex = /([0-9.]+)([wdhm])/g;
                     let totalSeconds = 0;
                     let match;
@@ -1277,50 +1312,56 @@ export default function Issues() {
                       else if (unit === "m") totalSeconds += val * 60;
                     }
                     if (totalSeconds === 0) {
-                      throw new Error("Định dạng thời gian không đúng. VD: 2h, 30m");
-                    }
-                    let finalComment = logWorkComment.trim();
-                    if (!finalComment) {
-                      const geminiKey = localStorage.getItem("gemini_api_key");
-                      if (geminiKey) {
-                        try {
-                          const summary = logWorkModalOpen.summary;
-                          const prompt = `Bạn là một kỹ sư phần mềm chuyên nghiệp. Hãy viết 1 câu ngắn gọn (dưới 15 từ) ghi chú lại công việc đã thực hiện cho task Jira có tiêu đề: "${summary}". Ví dụ: "Đã hoàn thành tối ưu hóa truy vấn SQL và sửa lỗi bộ lọc". Viết bằng tiếng Việt, trực tiếp, bắt đầu bằng từ hành động như "Hoàn thành...", "Cải tiến...", "Tối ưu...", "Sửa lỗi...", không dài dòng, không có phần giới thiệu, không thêm bất kỳ định dạng markdown hay dấu ngoặc kép nào xung quanh.`;
-                          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-                          });
-                          if (response.ok) {
-                            const data = await response.json();
-                            finalComment = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-                          } else {
-                            console.warn(`Auto AI comment failed: HTTP ${response.status}`);
-                          }
-                        } catch (e) {
-                          console.warn("Auto AI generation failed, falling back to static template", e);
-                        }
-                      }
-
-                      if (!finalComment) {
-                        finalComment = `Thực hiện công việc: ${logWorkModalOpen.summary}`;
-                      }
+                      alert("Định dạng thời gian không đúng. VD: 2h, 30m");
+                      return;
                     }
 
-                    await addWorklog(logWorkModalOpen.key, {
-                      timeSpentSeconds: totalSeconds,
-                      comment: finalComment,
-                    });
-                    
+                    const issueKey = logWorkModalOpen.key;
+                    const issueSummary = logWorkModalOpen.summary;
+                    const commentInput = logWorkComment.trim();
                     setLogWorkModalOpen(null);
-                    // Refresh issue details
-                    if (selectedIssue && selectedIssue.key === selectedIssue.key) {
-                      openDetail(selectedIssue);
-                    }
+                    
+                    const jobId = jobStore.addJob({ type: "Log Work", title: `Log work ${logWorkTime} cho ${issueKey}` });
+
+                    (async () => {
+                      try {
+                        let finalComment = commentInput;
+                        if (!finalComment) {
+                          const geminiKey = localStorage.getItem("gemini_api_key");
+                          if (geminiKey) {
+                            try {
+                              const prompt = `Bạn là một kỹ sư phần mềm chuyên nghiệp. Hãy viết 1 câu ngắn gọn (dưới 15 từ) ghi chú lại công việc đã thực hiện cho task Jira có tiêu đề: "${issueSummary}". Ví dụ: "Đã hoàn thành tối ưu hóa truy vấn SQL và sửa lỗi bộ lọc". Viết bằng tiếng Việt, trực tiếp, bắt đầu bằng từ hành động như "Hoàn thành...", "Cải tiến...", "Tối ưu...", "Sửa lỗi...", không dài dòng, không có phần giới thiệu, không thêm bất kỳ định dạng markdown hay dấu ngoặc kép nào xung quanh.`;
+                              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                              });
+                              if (response.ok) {
+                                const data = await response.json();
+                                finalComment = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+                              }
+                            } catch (e) {
+                              console.warn("Auto AI generation failed", e);
+                            }
+                          }
+                          if (!finalComment) {
+                            finalComment = `Thực hiện công việc: ${issueSummary}`;
+                          }
+                        }
+
+                        await addWorklog(issueKey, {
+                          timeSpentSeconds: totalSeconds,
+                          comment: finalComment,
+                        });
+                        
+                        jobStore.updateJobStatus(jobId, "success");
+                        jobStore.emit("REFRESH_ISSUES");
+                      } catch (e: any) {
+                        jobStore.updateJobStatus(jobId, "error", e.message || "Unknown error");
+                      }
+                    })();
                   } catch (e: any) {
                     alert("Lỗi khi log work: " + (e.message || "Unknown error"));
-                  } finally {
-                    setLoggingWork(false);
                   }
                 }}
               >
@@ -1383,97 +1424,86 @@ export default function Issues() {
                 className="btn btn-primary"
                 disabled={resolvingIssue || !resolveResolution}
                 onClick={async () => {
-                  try {
-                    setResolvingIssue(true);
-                    
-                    // Lấy transition Fixed
-                    const transitions = await getTransitions(resolveModalOpen.key);
-                    const toFixed = transitions.find(t => t.to.name.toLowerCase() === "fixed" || t.to.name.toLowerCase() === "resolved" || t.to.name.toLowerCase() === "done");
-                    
-                    if (toFixed) {
-                      // Tìm ID của custom field Output
-                      const allFields = await getJiraFields();
-                      const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
-                      const outputFieldId = outputField ? outputField.id : "customfield_10000"; // fallback
+                  const issueKey = resolveModalOpen.key;
+                  const issueSummary = resolveModalOpen.fields.summary;
+                  const resolution = resolveResolution;
+                  const output = resolveOutput;
+                  const comment = resolveComment;
+                  setResolveModalOpen(null);
+                  
+                  const jobId = jobStore.addJob({ type: "Cập nhật", title: `Fixed bug ${issueKey}` });
 
-                      const transitionFields: any = {
-                        resolution: { id: resolveResolution }
-                      };
+                  (async () => {
+                    try {
+                      // Lấy transition Fixed
+                      const transitions = await getTransitions(issueKey);
+                      const toFixed = transitions.find(t => t.to.name.toLowerCase() === "fixed" || t.to.name.toLowerCase() === "resolved" || t.to.name.toLowerCase() === "done");
                       
-                      let finalOutput = resolveOutput.trim();
-                      if (!finalOutput) {
-                         finalOutput = await generateAiOutput(resolveModalOpen.fields.summary);
-                      }
-                      if (!finalOutput) {
-                        finalOutput = `Đã hoàn thành: ${resolveModalOpen.fields.summary}`;
-                      }
+                      if (toFixed) {
+                        // Tìm ID của custom field Output
+                        const allFields = await getJiraFields();
+                        const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
+                        const outputFieldId = outputField ? outputField.id : "customfield_10000"; // fallback
 
-                      if (outputFieldId) {
-                        transitionFields[outputFieldId] = finalOutput;
-                      }
+                        const transitionFields: any = {
+                          resolution: { id: resolution }
+                        };
+                        
+                        let finalOutput = output.trim();
+                        if (!finalOutput) {
+                           finalOutput = await generateAiOutput(issueSummary);
+                        }
+                        if (!finalOutput) {
+                          finalOutput = `Đã hoàn thành: ${issueSummary}`;
+                        }
 
-                      try {
-                        await transitionIssue(resolveModalOpen.key, toFixed.id, transitionFields, resolveComment.trim() || undefined);
-                      } catch (transitionErr: any) {
-                        const errors = transitionErr.response?.data?.errors || {};
-                        const hasScreenError = Object.values(errors).some((msg: any) => typeof msg === 'string' && msg.includes("appropriate screen"));
-                        if (hasScreenError) {
-                          // Try without fields
-                          await transitionIssue(resolveModalOpen.key, toFixed.id, undefined, resolveComment.trim() || undefined);
-                          // Try to update Output field via PUT instead of transition
-                          if (outputFieldId) {
-                            try {
-                              await updateIssue(resolveModalOpen.key, {
-                                fields: { [outputFieldId]: finalOutput }
-                              });
-                            } catch (putErr) {
-                              console.warn("Could not PUT output field", putErr);
+                        if (outputFieldId) {
+                          transitionFields[outputFieldId] = finalOutput;
+                        }
+
+                        try {
+                          await transitionIssue(issueKey, toFixed.id, transitionFields, comment.trim() || undefined);
+                        } catch (transitionErr: any) {
+                          const errors = transitionErr.response?.data?.errors || {};
+                          const hasScreenError = Object.values(errors).some((msg: any) => typeof msg === 'string' && msg.includes("appropriate screen"));
+                          if (hasScreenError) {
+                            await transitionIssue(issueKey, toFixed.id, undefined, comment.trim() || undefined);
+                            if (outputFieldId) {
+                              try {
+                                await updateIssue(issueKey, {
+                                  fields: { [outputFieldId]: finalOutput }
+                                });
+                              } catch (putErr) {
+                                console.warn("Could not PUT output field", putErr);
+                              }
                             }
+                          } else {
+                            throw transitionErr;
                           }
-                        } else {
-                          throw transitionErr;
                         }
                       }
-                    }
-                    
-                    // Chuyển sang Commit (nếu có) - CHỈ DÀNH CHO BUG
-                    let newTransitions = await getTransitions(resolveModalOpen.key);
-                    const isBug = resolveModalOpen.fields.issuetype?.name?.toLowerCase().includes("bug");
-                    if (isBug) {
-                      let toCommit = newTransitions.find(t => t.to.name.toLowerCase().includes("commit") || t.name.toLowerCase().includes("commit"));
-                      if (toCommit) {
-                        await transitionIssue(resolveModalOpen.key, toCommit.id);
-                        newTransitions = await getTransitions(resolveModalOpen.key);
+                      
+                      let newTransitions = await getTransitions(issueKey);
+                      const isBug = true; // Modal is only opened for bugs
+                      if (isBug) {
+                        let toCommit = newTransitions.find(t => t.to.name.toLowerCase().includes("commit") || t.name.toLowerCase().includes("commit"));
+                        if (toCommit) {
+                          await transitionIssue(issueKey, toCommit.id);
+                          newTransitions = await getTransitions(issueKey);
+                        }
                       }
-                    }
-                    
-                    // Nếu là UAT bug thì chuyển sang UAT
-                    const isUatBug = resolveModalOpen.fields.issuetype?.name?.toLowerCase() === "uat bug";
-                    if (isUatBug) {
-                      let toUat = newTransitions.find(t => t.to.name.toLowerCase().includes("uat") || t.name.toLowerCase().includes("uat"));
-                      if (toUat) {
-                        await transitionIssue(resolveModalOpen.key, toUat.id);
-                        newTransitions = await getTransitions(resolveModalOpen.key);
+                      
+                      let toClosed = newTransitions.find(t => t.to.name.toLowerCase() === "closed" || t.to.name.toLowerCase() === "đóng" || t.name.toLowerCase().includes("close"));
+                      if (toClosed) {
+                        await transitionIssue(issueKey, toClosed.id);
                       }
+                      
+                      jobStore.updateJobStatus(jobId, "success");
+                      jobStore.emit("REFRESH_ISSUES");
+                    } catch (e: any) {
+                      jobStore.updateJobStatus(jobId, "error", e.message || "Unknown error");
                     }
-                    
-                    // Chuyển sang Closed (nếu có)
-                    let toClosed = newTransitions.find(t => t.to.name.toLowerCase() === "closed" || t.to.name.toLowerCase() === "đóng" || t.name.toLowerCase().includes("close"));
-                    if (toClosed) {
-                      await transitionIssue(resolveModalOpen.key, toClosed.id);
-                    }
-                    
-                    setResolveModalOpen(null);
-                    fetchIssues();
-                    if (selectedIssue && (selectedIssue.key === resolveModalOpen.key || selectedIssue.fields.subtasks?.some(s => s.key === resolveModalOpen.key))) {
-                       const freshIssue = await getIssue(selectedIssue.key);
-                       setSelectedIssue(freshIssue);
-                    }
-                  } catch (e: any) {
-                    alert("Lỗi khi chuyển trạng thái: " + (e.message || "Unknown error"));
-                  } finally {
-                    setResolvingIssue(false);
-                  }
+                  })();
                 }}
               >
                 {resolvingIssue ? "Đang xử lý..." : "Fixed"}
@@ -1485,11 +1515,11 @@ export default function Issues() {
 
       {/* Comment Modal */}
       {commentIssueKey && (
-        <div className="modal-overlay" onClick={() => { if (!isSubmittingComment) { setCommentIssueKey(null); setCommentText(""); setCommentFile(null); } }}>
+        <div className="modal-overlay" onClick={() => { setCommentIssueKey(null); setCommentText(""); setCommentFile(null); }}>
           <div className="modal" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div className="modal-title">Thêm Comment - {commentIssueKey}</div>
-              <button className="modal-close" onClick={() => { if (!isSubmittingComment) { setCommentIssueKey(null); setCommentText(""); setCommentFile(null); } }}>✕</button>
+              <button className="modal-close" onClick={() => { setCommentIssueKey(null); setCommentText(""); setCommentFile(null); }}>✕</button>
             </div>
             
             <div className="form-group">
@@ -1520,9 +1550,9 @@ export default function Issues() {
             </div>
 
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => { setCommentIssueKey(null); setCommentText(""); setCommentFile(null); }} disabled={isSubmittingComment}>Hủy</button>
-              <button onClick={handleCommentSubmit} className="btn btn-primary" disabled={isSubmittingComment}>
-                {isSubmittingComment ? "Đang gửi..." : "Gửi Comment"}
+              <button className="btn btn-secondary" onClick={() => { setCommentIssueKey(null); setCommentText(""); setCommentFile(null); }}>Hủy</button>
+              <button onClick={handleCommentSubmit} className="btn btn-primary">
+                Gửi Comment
               </button>
             </div>
           </div>
@@ -1531,11 +1561,11 @@ export default function Issues() {
 
       {/* Edit Estimate Modal */}
       {estimateModalOpen && (
-        <div className="modal-overlay" onClick={() => !updatingEstimate && setEstimateModalOpen(null)}>
+        <div className="modal-overlay" onClick={() => setEstimateModalOpen(null)}>
           <div className="modal" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div className="modal-title">Cập nhật Estimate - {estimateModalOpen.key}</div>
-              <button className="modal-close" onClick={() => !updatingEstimate && setEstimateModalOpen(null)}>✕</button>
+              <button className="modal-close" onClick={() => setEstimateModalOpen(null)}>✕</button>
             </div>
             <div className="form-group">
               <label>Estimate hiện tại: {estimateModalOpen.estimate || "Trống"}</label>
@@ -1544,18 +1574,75 @@ export default function Issues() {
                 value={newEstimate}
                 onChange={(e) => setNewEstimate(e.target.value)}
                 placeholder="VD: 2h, 30m, 1d"
-                disabled={updatingEstimate}
                 autoFocus
               />
             </div>
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setEstimateModalOpen(null)} disabled={updatingEstimate}>Hủy</button>
+              <button className="btn btn-secondary" onClick={() => setEstimateModalOpen(null)}>Hủy</button>
               <button
                 className="btn btn-primary"
-                disabled={!newEstimate.trim() || updatingEstimate}
+                disabled={!newEstimate.trim()}
                 onClick={handleEstimateSubmit}
               >
-                {updatingEstimate ? "Đang lưu..." : "Lưu Estimate"}
+                Lưu Estimate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Change Status Modal */}
+      {statusTransitionModalOpen && (
+        <div className="modal-overlay" onClick={() => !statusTransitioning && setStatusTransitionModalOpen(null)}>
+          <div className="modal" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Đổi Status - {statusTransitionModalOpen.key}</div>
+              <button className="modal-close" onClick={() => !statusTransitioning && setStatusTransitionModalOpen(null)}>✕</button>
+            </div>
+            
+            <div className="form-group">
+              <label>Chọn Status Mới *</label>
+              {statusTransitionLoading ? (
+                <div style={{ padding: 8, color: "var(--text-muted)", fontSize: 13 }}>Đang tải danh sách status...</div>
+              ) : availableTransitions.length === 0 ? (
+                <div style={{ padding: 8, color: "var(--accent-red)", fontSize: 13 }}>Không có status nào khả dụng để chuyển lúc này.</div>
+              ) : (
+                <select 
+                  value={selectedTransition} 
+                  onChange={e => setSelectedTransition(e.target.value)}
+                  disabled={statusTransitioning}
+                  required
+                >
+                  <option value="" disabled>-- Chọn status --</option>
+                  {availableTransitions.map(t => (
+                    <option key={t.id} value={t.id}>{t.name} ➔ {t.to.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setStatusTransitionModalOpen(null)} disabled={statusTransitioning}>Hủy</button>
+              <button
+                className="btn btn-primary"
+                disabled={statusTransitioning || statusTransitionLoading || !selectedTransition || availableTransitions.length === 0}
+                onClick={() => {
+                  const issueKey = statusTransitionModalOpen.key;
+                  const transitionId = selectedTransition;
+                  setStatusTransitionModalOpen(null);
+                  const jobId = jobStore.addJob({ type: "Cập nhật", title: `Đổi status: ${issueKey}` });
+                  (async () => {
+                    try {
+                      await transitionIssue(issueKey, transitionId);
+                      jobStore.updateJobStatus(jobId, "success");
+                      jobStore.emit("REFRESH_ISSUES");
+                    } catch (e: any) {
+                      jobStore.updateJobStatus(jobId, "error", e.message || "Unknown error");
+                    }
+                  })();
+                }}
+              >
+                {statusTransitioning ? "Đang xử lý..." : "Chuyển"}
               </button>
             </div>
           </div>

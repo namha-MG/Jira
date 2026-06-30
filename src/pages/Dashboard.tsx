@@ -10,6 +10,7 @@ import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
 import UserSelect from "../components/UserSelect";
 import { getHolidays } from "../utils";
+import { jobStore } from "../stores/jobStore";
 
 interface ProjectStat {
   projectKey: string;
@@ -368,140 +369,156 @@ export default function Dashboard() {
     setShowTeamCloseModal(true);
   };
 
-  const executeTeamAutoClose = async () => {
+  const executeTeamAutoClose = () => {
     const targetsToClose = filteredTeamClosableTargets.filter(t => teamSelectedTargets.has(t.key));
     if (targetsToClose.length === 0) return;
     setShowTeamCloseModal(false);
 
-    setTransitioning(true);
-    let successCount = 0;
-
+    // Dispatch each task as an individual background job
     for (const task of targetsToClose) {
       const key = task.key;
-      setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key}`);
-      try {
-        let transitions = await getTransitions(key);
+      const jobId = jobStore.addJob({ type: "Đóng Task", title: `Đóng task team: ${key}` });
+      (async () => {
+        try {
+          let transitions = await getTransitions(key);
+          const inprogressKeywords = ["in progress", "đang thực hiện", "đang làm", "to do", "cần làm"];
+          const resolvedKeywords = ["resolved", "done", "đã giải quyết", "hoàn thành", "ready for test", "resolved / done"];
+          const closedKeywords = ["closed", "đóng", "close"];
 
-        const inprogressKeywords = ["in progress", "đang thực hiện", "đang làm", "to do", "cần làm"];
-        const resolvedKeywords = ["resolved", "done", "đã giải quyết", "hoàn thành", "ready for test", "resolved / done"];
-        const closedKeywords = ["closed", "đóng", "close"];
+          const currentStatusName = task.fields.status.name.toLowerCase();
+          const isAlreadyResolved = resolvedKeywords.some(kw => currentStatusName.includes(kw));
+          const isAlreadyClosed = closedKeywords.some(kw => currentStatusName.includes(kw));
 
-        const currentStatusName = task.fields.status.name.toLowerCase();
-        const isAlreadyResolved = resolvedKeywords.some(kw => currentStatusName.includes(kw));
-        const isAlreadyClosed = closedKeywords.some(kw => currentStatusName.includes(kw));
-
-        if (!isAlreadyResolved && !isAlreadyClosed) {
-          const toInProgress = transitions.find(t =>
-            inprogressKeywords.includes(t.to.name.toLowerCase()) ||
-            inprogressKeywords.some(kw => t.name.toLowerCase().includes(kw))
-          );
-          if (toInProgress) {
-            setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toInProgress.to.name}`);
-            await transitionIssue(key, toInProgress.id);
-            transitions = await getTransitions(key);
-          }
-
-          const getJiraErrorMsg = (err: any) => {
-            const data = err?.response?.data;
-            if (!data) return err.message;
-            if (data.errorMessages && data.errorMessages.length > 0) return data.errorMessages[0];
-            if (data.errors) return JSON.stringify(data.errors);
-            return err.message;
-          };
-
-          const toResolved = transitions.find(t =>
-            resolvedKeywords.includes(t.to.name.toLowerCase()) ||
-            resolvedKeywords.some(kw => t.name.toLowerCase().includes(kw))
-          );
-          if (toResolved) {
-            setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toResolved.to.name}`);
-            const allFields = await getJiraFields();
-            const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
-            const transitionFields: any = { resolution: { id: "10000" } };
-            if (outputField) {
-              const aiOutput = await generateAiOutput(task.fields.summary);
-              transitionFields[outputField.id] = aiOutput;
+          if (!isAlreadyResolved && !isAlreadyClosed) {
+            const toInProgress = transitions.find(t =>
+              inprogressKeywords.includes(t.to.name.toLowerCase()) ||
+              inprogressKeywords.some(kw => t.name.toLowerCase().includes(kw))
+            );
+            if (toInProgress) {
+              await transitionIssue(key, toInProgress.id);
+              transitions = await getTransitions(key);
             }
 
-            try {
-              await transitionIssue(key, toResolved.id, transitionFields);
-            } catch (e) {
-              console.warn(`Chuyển sang Resolved với fields thất bại cho ${key}. Lỗi:`, getJiraErrorMsg(e));
-              await transitionIssue(key, toResolved.id);
+            const toResolved = transitions.find(t =>
+              resolvedKeywords.includes(t.to.name.toLowerCase()) ||
+              resolvedKeywords.some(kw => t.name.toLowerCase().includes(kw))
+            );
+            if (toResolved) {
+              const allFields = await getJiraFields();
+              const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
+              const transitionFields: any = { resolution: { id: "10000" } };
+              if (outputField) {
+                const aiOutput = await generateAiOutput(task.fields.summary);
+                transitionFields[outputField.id] = aiOutput;
+              }
+              try {
+                await transitionIssue(key, toResolved.id, transitionFields);
+              } catch {
+                await transitionIssue(key, toResolved.id);
+              }
+              transitions = await getTransitions(key);
             }
-            transitions = await getTransitions(key);
           }
-        }
 
-        const toClosed = transitions.find(t =>
-          closedKeywords.includes(t.to.name.toLowerCase()) ||
-          closedKeywords.some(kw => t.name.toLowerCase().includes(kw))
-        );
-        if (toClosed) {
-          setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toClosed.to.name}`);
-          await transitionIssue(key, toClosed.id);
+          const toClosed = transitions.find(t =>
+            closedKeywords.includes(t.to.name.toLowerCase()) ||
+            closedKeywords.some(kw => t.name.toLowerCase().includes(kw))
+          );
+          if (toClosed) {
+            await transitionIssue(key, toClosed.id);
+          }
+          jobStore.updateJobStatus(jobId, "success");
+        } catch (err: any) {
+          jobStore.updateJobStatus(jobId, "error", err.message || "Unknown error");
         }
-
-        successCount++;
-      } catch (err: any) {
-        console.warn(`Lỗi khi xử lý ${key}`, err);
-      }
+      })();
     }
-    
-    setTransitioning(false);
-    setTransitionStatus("");
   };
 
-  const executeAutoClose = async () => {
+  const executeAutoClose = () => {
     if (selectedTargets.size === 0) return;
     setShowCloseModal(false);
-
-    setTransitioning(true);
-    let successCount = 0;
 
     const targetsToClose = closableTargets.filter(t => selectedTargets.has(t.key));
 
     for (const task of targetsToClose) {
       const key = task.key;
-      setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key}`);
-      try {
-        let transitions = await getTransitions(key);
+      const jobId = jobStore.addJob({ type: "Đóng Task", title: `Auto close: ${key}` });
+      (async () => {
+        try {
+          let transitions = await getTransitions(key);
 
-        const inprogressKeywords = ["in progress", "đang thực hiện", "đang làm", "to do", "cần làm"];
-        const resolvedKeywords = ["resolved", "done", "đã giải quyết", "hoàn thành", "ready for test", "resolved / done"];
-        const closedKeywords = ["closed", "đóng", "close"];
+          const inprogressKeywords = ["in progress", "đang thực hiện", "đang làm", "to do", "cần làm"];
+          const resolvedKeywords = ["resolved", "done", "đã giải quyết", "hoàn thành", "ready for test", "resolved / done"];
+          const closedKeywords = ["closed", "đóng", "close"];
 
-        const currentStatusName = task.fields.status.name.toLowerCase();
-        const isAlreadyResolved = resolvedKeywords.some(kw => currentStatusName.includes(kw));
-        const isAlreadyClosed = closedKeywords.some(kw => currentStatusName.includes(kw));
+          const currentStatusName = task.fields.status.name.toLowerCase();
+          const isAlreadyResolved = resolvedKeywords.some(kw => currentStatusName.includes(kw));
+          const isAlreadyClosed = closedKeywords.some(kw => currentStatusName.includes(kw));
 
-        if (!isAlreadyResolved && !isAlreadyClosed) {
-          // 1. Chuyển sang In Progress (nếu có)
-          const toInProgress = transitions.find(t =>
-            inprogressKeywords.includes(t.to.name.toLowerCase()) ||
-            inprogressKeywords.some(kw => t.name.toLowerCase().includes(kw))
-          );
-          if (toInProgress) {
-            setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toInProgress.to.name}`);
-            await transitionIssue(key, toInProgress.id);
-            transitions = await getTransitions(key);
+          if (!isAlreadyResolved && !isAlreadyClosed) {
+            const toInProgress = transitions.find(t =>
+              inprogressKeywords.includes(t.to.name.toLowerCase()) ||
+              inprogressKeywords.some(kw => t.name.toLowerCase().includes(kw))
+            );
+            if (toInProgress) {
+              await transitionIssue(key, toInProgress.id);
+              transitions = await getTransitions(key);
+            }
+
+            const getJiraErrorMsg = (err: any) => {
+              const data = err?.response?.data;
+              if (!data) return err.message;
+              if (data.errorMessages && data.errorMessages.length > 0) return data.errorMessages[0];
+              if (data.errors) return JSON.stringify(data.errors);
+              return err.message;
+            };
+
+            const toResolved = transitions.find(t =>
+              resolvedKeywords.includes(t.to.name.toLowerCase()) ||
+              resolvedKeywords.some(kw => t.name.toLowerCase().includes(kw))
+            );
+            if (toResolved) {
+              const allFields = await getJiraFields();
+              const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
+              const transitionFields: any = { resolution: { id: "10000" } };
+              if (outputField) {
+                const aiOutput = await generateAiOutput(task.fields.summary);
+                transitionFields[outputField.id] = aiOutput;
+              }
+              try {
+                await transitionIssue(key, toResolved.id, transitionFields);
+              } catch (e) {
+                console.warn(`Chuyển sang Resolved với fields thất bại cho ${key}:`, getJiraErrorMsg(e));
+                await transitionIssue(key, toResolved.id);
+              }
+              transitions = await getTransitions(key);
+            }
           }
 
-          const getJiraErrorMsg = (err: any) => {
-            const data = err?.response?.data;
-            if (!data) return err.message;
-            if (data.errorMessages && data.errorMessages.length > 0) return data.errorMessages[0];
-            if (data.errors) return JSON.stringify(data.errors);
-            return err.message;
-          };
+          const isBug = task.fields.issuetype?.name?.toLowerCase().includes("bug");
+          if (isBug) {
+            const toCommit = transitions.find(t => t.to.name.toLowerCase().includes("commit") || t.name.toLowerCase().includes("commit"));
+            if (toCommit) {
+              await transitionIssue(key, toCommit.id);
+              transitions = await getTransitions(key);
+            }
+          }
 
-          // 2. Chuyển sang Resolved/Hoàn thành
-          const toResolved = transitions.find(t =>
-            resolvedKeywords.includes(t.to.name.toLowerCase()) ||
-            resolvedKeywords.some(kw => t.name.toLowerCase().includes(kw))
+          const isUatBug = task.fields.issuetype?.name?.toLowerCase() === "uat bug";
+          if (isUatBug) {
+            const toUat = transitions.find(t => t.to.name.toLowerCase().includes("uat") || t.name.toLowerCase().includes("uat"));
+            if (toUat) {
+              await transitionIssue(key, toUat.id);
+              transitions = await getTransitions(key);
+            }
+          }
+
+          const toClosed = transitions.find(t =>
+            closedKeywords.includes(t.to.name.toLowerCase()) ||
+            closedKeywords.some(kw => t.name.toLowerCase().includes(kw))
           );
-          if (toResolved) {
-            setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toResolved.to.name}`);
+          if (toClosed) {
             const allFields = await getJiraFields();
             const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
             const transitionFields: any = { resolution: { id: "10000" } };
@@ -509,91 +526,18 @@ export default function Dashboard() {
               const aiOutput = await generateAiOutput(task.fields.summary);
               transitionFields[outputField.id] = aiOutput;
             }
-
             try {
-              await transitionIssue(key, toResolved.id, transitionFields);
-            } catch (e) {
-              console.warn(`Chuyển sang Resolved với fields thất bại cho ${key}. Lỗi:`, getJiraErrorMsg(e));
-              await transitionIssue(key, toResolved.id);
-            }
-            transitions = await getTransitions(key);
-          }
-        }
-
-        // 2.5 Chuyển sang Commit (nếu có) - CHỈ DÀNH CHO BUG
-        const isBug = task.fields.issuetype?.name?.toLowerCase().includes("bug");
-        if (isBug) {
-          const toCommit = transitions.find(t => t.to.name.toLowerCase().includes("commit") || t.name.toLowerCase().includes("commit"));
-          if (toCommit) {
-            setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toCommit.to.name}`);
-            await transitionIssue(key, toCommit.id);
-            transitions = await getTransitions(key);
-          }
-        }
-
-        // 2.7 Chuyển sang UAT (nếu là UAT bug)
-        const isUatBug = task.fields.issuetype?.name?.toLowerCase() === "uat bug";
-        if (isUatBug) {
-          const toUat = transitions.find(t => t.to.name.toLowerCase().includes("uat") || t.name.toLowerCase().includes("uat"));
-          if (toUat) {
-            setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toUat.to.name}`);
-            await transitionIssue(key, toUat.id);
-            transitions = await getTransitions(key);
-          }
-        }
-
-        // 3. Chuyển sang Closed/Đóng
-        const toClosed = transitions.find(t =>
-          closedKeywords.includes(t.to.name.toLowerCase()) ||
-          closedKeywords.some(kw => t.name.toLowerCase().includes(kw))
-        );
-        if (toClosed) {
-          setTransitionStatus(`Đang xử lý (${successCount + 1}/${targetsToClose.length}): ${key} ➔ ${toClosed.to.name}`);
-          const allFields = await getJiraFields();
-          const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
-          const transitionFields: any = { resolution: { id: "10000" } };
-          if (outputField) {
-            const aiOutput = await generateAiOutput(task.fields.summary);
-            transitionFields[outputField.id] = aiOutput;
-          }
-
-          try {
-            await transitionIssue(key, toClosed.id, transitionFields);
-          } catch (e: any) {
-            const data = e?.response?.data;
-            let msg = e.message;
-            if (data?.errorMessages?.length) msg = data.errorMessages[0];
-            else if (data?.errors) msg = JSON.stringify(data.errors);
-            console.warn(`Chuyển sang Closed với fields thất bại cho ${key}, thử lại không dùng fields. Lỗi: ${msg}`);
-
-            try {
+              await transitionIssue(key, toClosed.id, transitionFields);
+            } catch {
               await transitionIssue(key, toClosed.id);
-            } catch (innerE: any) {
-              const innerData = innerE?.response?.data;
-              let innerMsg = innerE.message;
-              if (innerData?.errorMessages?.length) innerMsg = innerData.errorMessages[0];
-              else if (innerData?.errors) innerMsg = JSON.stringify(innerData.errors);
-
-              alert(`Không thể chuyển ${key} sang Closed. Lỗi Jira: ${innerMsg}`);
-              throw innerE;
             }
           }
-        } else {
-          const avail = transitions.map(t => t.name).join(", ");
-          console.warn(`Không tìm thấy transition Closed cho ${key}. Các transition hiện có:`, avail);
-          alert(`Task ${key} không có bước nào để chuyển sang Closed!\nCác bước hiện có: ${avail || "Không có bước nào"}`);
+          jobStore.updateJobStatus(jobId, "success");
+        } catch (err: any) {
+          jobStore.updateJobStatus(jobId, "error", err.message || "Unknown error");
         }
-
-        successCount++;
-      } catch (err) {
-        console.error(`Lỗi chuyển đổi trạng thái ${key}:`, err);
-      }
+      })();
     }
-
-    setTransitioning(false);
-    setTransitionStatus("");
-    alert(`✅ Hoàn thành! Đã chuyển trạng thái thành công cho ${successCount}/${targetsToClose.length} task.`);
-    fetchData(); // Refresh dashboard
   };
 
   const handleCommentSubmit = async () => {
@@ -603,32 +547,31 @@ export default function Dashboard() {
       return;
     }
 
-    setIsSubmittingComment(true);
-    try {
-      let finalCommentText = commentText;
+    const issueKey = commentIssueKey;
+    const text = commentText;
+    const file = commentFile;
+    setCommentIssueKey(null);
+    setCommentText("");
+    setCommentFile(null);
+    const jobId = jobStore.addJob({ type: "Bình luận", title: `Thêm comment cho ${issueKey}` });
 
-      if (commentFile) {
-        // Upload file first
-        const uploadRes = await uploadAttachment(commentIssueKey, commentFile);
-        const filename = uploadRes && uploadRes.length > 0 && uploadRes[0].filename
-          ? uploadRes[0].filename
-          : commentFile.name;
-
-        // Append image reference using Jira markup
-        finalCommentText += `\n\n!${filename}!`;
+    (async () => {
+      try {
+        let finalCommentText = text;
+        if (file) {
+          const uploadRes = await uploadAttachment(issueKey, file);
+          const filename = uploadRes && uploadRes.length > 0 && uploadRes[0].filename
+            ? uploadRes[0].filename
+            : file.name;
+          finalCommentText += `\n\n!${filename}!`;
+        }
+        await addComment(issueKey, finalCommentText);
+        jobStore.updateJobStatus(jobId, "success");
+      } catch (e: any) {
+        console.error("Failed to add comment:", e);
+        jobStore.updateJobStatus(jobId, "error", e.response?.data?.errorMessages?.[0] || e.message);
       }
-
-      await addComment(commentIssueKey, finalCommentText);
-      alert("Đã thêm comment thành công!");
-      setCommentIssueKey(null);
-      setCommentText("");
-      setCommentFile(null);
-    } catch (e: any) {
-      console.error("Failed to add comment:", e);
-      alert("Lỗi khi thêm comment: " + (e.response?.data?.errorMessages?.[0] || e.message));
-    } finally {
-      setIsSubmittingComment(false);
-    }
+    })();
   };
 
   const fetchData = useCallback(async () => {

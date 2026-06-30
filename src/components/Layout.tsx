@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { useMsal } from "@azure/msal-react";
 import { NavLink } from "react-router-dom";
+import JobManager from "./JobManager";
 import type { Page } from "../types";
 
 interface LayoutProps {
@@ -85,6 +86,8 @@ export default function Layout({ children, onLogout }: LayoutProps) {
 
       {/* Main */}
       <main className="main-content">{children}</main>
+
+      <JobManager />
     </div>
   );
 }
