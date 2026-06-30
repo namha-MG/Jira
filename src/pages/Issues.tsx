@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, updateIssueEstimate, updateIssue
+  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, updateIssueEstimate, updateIssue, getCurrentUser
 } from "../jiraService";
 import { JIRA_PROJECTS } from "../config";
 import NotificationBell from "../components/NotificationBell";
@@ -10,6 +10,49 @@ import { jobStore } from "../stores/jobStore";
 function normalizeText(str?: string) {
   if (!str) return "";
   return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "d").toLowerCase();
+}
+
+function userIdentityKeys(user: JiraUser | null | undefined): string[] {
+  if (!user) return [];
+  return [user.accountId, user.name, user.emailAddress]
+    .filter((value): value is string => !!value)
+    .map(value => value.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isWorklogByUser(worklog: JiraWorklog, user: JiraUser | null): boolean {
+  if (!user) return true;
+
+  const userKeys = userIdentityKeys(user);
+  const authorKeys = userIdentityKeys(worklog.author);
+  return userKeys.some(key => authorKeys.includes(key));
+}
+
+function isDateInRange(date: Date, range?: { start: Date; end: Date }): boolean {
+  const time = date.getTime();
+  if (Number.isNaN(time)) return false;
+  if (!range) return true;
+  return time >= range.start.getTime() && time <= range.end.getTime();
+}
+
+function getIssueWorklogSeconds(
+  issue: JiraIssue,
+  currentUser: JiraUser | null,
+  range?: { start: Date; end: Date }
+): number {
+  return issue.fields.worklog?.worklogs?.reduce((sum, worklog) => {
+    if (!isWorklogByUser(worklog, currentUser)) return sum;
+
+    const worklogDate = new Date(worklog.started);
+    if (!isDateInRange(worklogDate, range)) return sum;
+
+    return sum + (worklog.timeSpentSeconds || 0);
+  }, 0) || 0;
+}
+
+function userMatchesFilter(user: JiraUser | null, filter: string): boolean {
+  if (!user || filter === "all" || filter === "unassigned") return false;
+  return userIdentityKeys(user).includes(filter.trim().toLowerCase());
 }
 
 function getBadgeClass(status: string): string {
@@ -83,6 +126,7 @@ export default function Issues() {
   const [selectedTransition, setSelectedTransition] = useState<string>("");
   const [statusTransitionLoading, setStatusTransitionLoading] = useState(false);
   const [statusTransitioning, setStatusTransitioning] = useState(false);
+  const [currentUser, setCurrentUser] = useState<JiraUser | null>(null);
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
 
@@ -92,6 +136,10 @@ export default function Issues() {
     
     // Fetch all assignable users for the selected project
     if (isConfigured) {
+      getCurrentUser()
+        .then(user => setCurrentUser(user))
+        .catch(e => console.warn("Lỗi khi tải user hiện tại", e));
+
       setLoadingUsers(true);
       getAssignableUsers(selectedProject)
         .then(users => setProjectUsers(users))
@@ -139,7 +187,44 @@ export default function Issues() {
         }
       }
 
-      setIssues(result);
+      const issuesWithFullWorklogs = [...result];
+      const issuesNeedingFullWorklogs = issuesWithFullWorklogs.filter((issue) => {
+        const worklog = issue.fields.worklog;
+        return worklog && worklog.total > (worklog.worklogs?.length || 0);
+      });
+
+      const batchSize = 8;
+      for (let i = 0; i < issuesNeedingFullWorklogs.length; i += batchSize) {
+        const batch = issuesNeedingFullWorklogs.slice(i, i + batchSize);
+        const entries = await Promise.all(batch.map(async (issue) => {
+          try {
+            const logs = await getWorklogs(issue.key);
+            return { key: issue.key, worklogs: logs };
+          } catch (e) {
+            console.warn(`Lỗi lấy đầy đủ worklog cho ${issue.key}`, e);
+            return { key: issue.key, worklogs: issue.fields.worklog?.worklogs || [] };
+          }
+        }));
+
+        entries.forEach(({ key, worklogs }) => {
+          const issueIndex = issuesWithFullWorklogs.findIndex(issue => issue.key === key);
+          if (issueIndex < 0) return;
+
+          const issue = issuesWithFullWorklogs[issueIndex];
+          issuesWithFullWorklogs[issueIndex] = {
+            ...issue,
+            fields: {
+              ...issue.fields,
+              worklog: {
+                total: worklogs.length,
+                worklogs,
+              },
+            },
+          };
+        });
+      }
+
+      setIssues(issuesWithFullWorklogs);
       setPage(1); // Reset trang về 1 mỗi khi load lại
     } catch (err: unknown) {
       const e = err as { message?: string };
@@ -316,6 +401,17 @@ export default function Issues() {
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const loggedRange = timeRange === "month" ? { start: startOfMonth, end: endOfToday } : undefined;
+  const shouldUseCurrentUserWorklogs =
+    loadScope === "me" ||
+    userMatchesFilter(currentUser, assigneeFilter);
+  const worklogUserForView = shouldUseCurrentUserWorklogs ? currentUser : null;
+  const getLoggedForIssue = (issue: JiraIssue) => {
+    const logged = getIssueWorklogSeconds(issue, worklogUserForView, loggedRange);
+    if (logged > 0 || issue.fields.worklog?.worklogs?.length) return logged;
+    return issue.fields.timetracking?.timeSpentSeconds || 0;
+  };
 
   // Filter + sort
   const filtered = issues
@@ -332,20 +428,20 @@ export default function Issues() {
       if (timeRange === "month") {
         const updatedDate = new Date(i.fields.updated);
         const hasWorklogThisMonth = i.fields.worklog?.worklogs?.some(
-          (wl) => new Date(wl.started) >= startOfMonth
+          (wl) => isWorklogByUser(wl, worklogUserForView) && isDateInRange(new Date(wl.started), loggedRange)
         );
-        matchTime = updatedDate >= startOfMonth || !!hasWorklogThisMonth;
+        matchTime = isDateInRange(updatedDate, loggedRange) || !!hasWorklogThisMonth;
       }
 
       const matchAssignee = assigneeFilter === "all" ||
         (assigneeFilter === "unassigned" && !i.fields.assignee) ||
-        (i.fields.assignee && (i.fields.assignee.name || i.fields.assignee.accountId || i.fields.assignee.emailAddress) === assigneeFilter);
+        userIdentityKeys(i.fields.assignee).includes(assigneeFilter.trim().toLowerCase());
 
       let matchAdvanced = true;
       if (advancedFilter !== "all") {
         const statusName = i.fields.status.name.toLowerCase();
         const isDone = statusName === "done" || statusName === "resolved" || statusName === "closed" || statusName === "hoàn thành" || statusName === "đã giải quyết";
-        const log = i.fields.timetracking?.timeSpentSeconds || 0;
+        const log = getLoggedForIssue(i);
         const dueDateStr = i.fields.duedate || i.fields.customfield_10302;
         let isOverdue = false;
         if (dueDateStr && !isDone) {
@@ -378,13 +474,8 @@ export default function Issues() {
         va = new Date(a.fields.updated).getTime();
         vb = new Date(b.fields.updated).getTime();
       } else if (sortBy === "logged") {
-        if (timeRange === "month") {
-          va = a.fields.worklog?.worklogs?.reduce((s, wl) => new Date(wl.started) >= startOfMonth ? s + wl.timeSpentSeconds : s, 0) || 0;
-          vb = b.fields.worklog?.worklogs?.reduce((s, wl) => new Date(wl.started) >= startOfMonth ? s + wl.timeSpentSeconds : s, 0) || 0;
-        } else {
-          va = a.fields.timetracking?.timeSpentSeconds || 0;
-          vb = b.fields.timetracking?.timeSpentSeconds || 0;
-        }
+        va = getLoggedForIssue(a);
+        vb = getLoggedForIssue(b);
       } else if (sortBy === "estimate") {
         va = a.fields.timetracking?.originalEstimateSeconds || 0;
         vb = b.fields.timetracking?.originalEstimateSeconds || 0;
@@ -649,7 +740,7 @@ export default function Issues() {
         {/* Table */}
         {(() => {
           const totalFilteredLoggedSeconds = filtered.reduce((sum, issue) => {
-            return sum + (issue.fields.timetracking?.timeSpentSeconds || 0);
+            return sum + getLoggedForIssue(issue);
           }, 0);
           const totalFilteredLoggedHours = (totalFilteredLoggedSeconds / 3600).toFixed(1);
 
@@ -716,7 +807,7 @@ export default function Issues() {
               ) : (
                 paginatedFiltered.map((issue) => {
                   const est = issue.fields.timetracking?.originalEstimateSeconds || 0;
-                  const log = issue.fields.timetracking?.timeSpentSeconds || 0;
+                  const log = getLoggedForIssue(issue);
                   const pct = est > 0 ? Math.round((log / est) * 100) : (log > 0 ? 100 : 0);
                   const updatedDate = new Date(issue.fields.updated).toLocaleDateString("vi-VN");
                   const startDateStr = issue.fields.customfield_10300 ? new Date(issue.fields.customfield_10300).toLocaleDateString("vi-VN") : "—";

@@ -600,7 +600,7 @@ export default function Dashboard() {
       }
 
       const projectKeys = JIRA_PROJECTS.map((p) => p.key);
-      const result = await getMyIssues({ projectKeys, maxResults: 200 });
+      const result = await getMyIssues({ projectKeys, maxResults: 2000 });
       const issuesWithFullWorklogs = [...result.issues];
       const issuesNeedingFullWorklogs = issuesWithFullWorklogs.filter((issue) => {
         const worklog = issue.fields.worklog;
