@@ -131,16 +131,16 @@ export default function UnassignedIssues() {
   const paginatedIssues = issues.slice((page - 1) * pageSize, page * pageSize);
 
   return (
-    <div className="page-container" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div className="page-header" style={{ marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    <div className="page-container unassigned-page" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      <div className="page-header unassigned-header" style={{ marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <h1 className="page-title">Task Chưa Gán (Unassigned)</h1>
           <p className="page-subtitle">Danh sách các Issue/Sub-task chưa được phân công cho bất kỳ ai.</p>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-end" }}>
-          <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+        <div className="unassigned-toolbar" style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-end" }}>
+          <div className="unassigned-control-row" style={{ display: "flex", gap: 16, alignItems: "center" }}>
             {/* Date Range Picker (Pill style) */}
-          <div style={{ display: "flex", alignItems: "center", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: "2px 4px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
+          <div className="unassigned-date-range" style={{ display: "flex", alignItems: "center", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: "2px 4px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
             <div style={{ padding: "0 8px" }}>
               <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>Từ</span>
             </div>
@@ -166,7 +166,7 @@ export default function UnassignedIssues() {
             />
           </div>
 
-          <div className="form-group" style={{ margin: 0 }}>
+          <div className="form-group unassigned-project-select" style={{ margin: 0 }}>
             <select
               value={selectedProject}
               onChange={(e) => setSelectedProject(e.target.value)}
@@ -183,7 +183,7 @@ export default function UnassignedIssues() {
           </button>
           <NotificationBell />
         </div>
-        <div style={{ display: "flex", gap: 16, alignItems: "center", fontSize: 13, color: "var(--text-secondary)" }}>
+        <div className="unassigned-toggle-row" style={{ display: "flex", gap: 16, alignItems: "center", fontSize: 13, color: "var(--text-secondary)" }}>
           <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
             <input type="checkbox" checked={ignoreDate} onChange={e => setIgnoreDate(e.target.checked)} />
             Bỏ qua lọc ngày
@@ -196,13 +196,13 @@ export default function UnassignedIssues() {
       </div>
     </div>
 
-      <div className="card" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div className="card unassigned-card" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {selectedIssues.length > 0 && (
-          <div style={{ padding: "12px 16px", background: "rgba(59, 130, 246, 0.1)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div className="unassigned-bulk-bar" style={{ padding: "12px 16px", background: "rgba(59, 130, 246, 0.1)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: "var(--accent-blue)" }}>
               Đã chọn {selectedIssues.length} task
             </div>
-            <div style={{ display: "flex", gap: 12 }}>
+            <div className="unassigned-bulk-actions" style={{ display: "flex", gap: 12 }}>
               <button 
                 className="btn btn-secondary btn-sm" 
                 onClick={() => setSelectedIssues([])}
@@ -228,8 +228,8 @@ export default function UnassignedIssues() {
             </div>
           </div>
         )}
-        <div style={{ flex: 1, overflow: "auto", minHeight: 300 }}>
-          <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div className="unassigned-table-wrap" style={{ flex: 1, overflow: "auto", minHeight: 300 }}>
+          <table className="table unassigned-table" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead style={{ position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 1, boxShadow: "0 1px 0 var(--border)" }}>
               <tr>
                 <th style={{ width: 40, textAlign: "center" }}>
@@ -277,7 +277,7 @@ export default function UnassignedIssues() {
 
                   return (
                     <tr key={issue.id}>
-                      <td style={{ textAlign: "center" }}>
+                      <td data-label="Chọn" style={{ textAlign: "center" }}>
                         <input
                           type="checkbox"
                           checked={selectedIssues.includes(issue.key)}
@@ -290,7 +290,7 @@ export default function UnassignedIssues() {
                           }}
                         />
                       </td>
-                      <td>
+                      <td data-label="Type">
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                           {issue.fields.issuetype?.iconUrl && (
                             <img src={issue.fields.issuetype.iconUrl} alt="type" style={{ width: 14, height: 14, borderRadius: 2 }} />
@@ -298,7 +298,7 @@ export default function UnassignedIssues() {
                           <span style={{ fontSize: 12 }}>{issue.fields.issuetype?.name}</span>
                         </div>
                       </td>
-                      <td>
+                      <td data-label="Key">
                         <a
                           href={`https://20.84.97.109:3033/browse/${issue.key}`}
                           target="_blank"
@@ -312,7 +312,7 @@ export default function UnassignedIssues() {
                           {issue.key}
                         </a>
                       </td>
-                      <td style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>
+                      <td data-label="Summary" style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>
                         {issue.fields.summary}
                         {issue.fields.parent && (
                           <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
@@ -321,16 +321,16 @@ export default function UnassignedIssues() {
                           </div>
                         )}
                       </td>
-                      <td>
+                      <td data-label="Status">
                         <span className={getBadgeClass(issue.fields.status.name)}>
                           {issue.fields.status.name}
                         </span>
                       </td>
-                      <td style={{ fontSize: 12, color: "var(--text-muted)" }}>{createdDate}</td>
-                      <td style={{ textAlign: "right", fontSize: 13, fontWeight: 500, color: (issue.fields.aggregatetimespent || issue.fields.timetracking?.timeSpentSeconds) ? "var(--accent-orange, #f97316)" : "var(--text-muted)" }}>
+                      <td data-label="Created" style={{ fontSize: 12, color: "var(--text-muted)" }}>{createdDate}</td>
+                      <td data-label="Logged" style={{ textAlign: "right", fontSize: 13, fontWeight: 500, color: (issue.fields.aggregatetimespent || issue.fields.timetracking?.timeSpentSeconds) ? "var(--accent-orange, #f97316)" : "var(--text-muted)" }}>
                         {formatSeconds(issue.fields.aggregatetimespent || issue.fields.timetracking?.timeSpentSeconds || 0)}
                       </td>
-                      <td style={{ textAlign: "right" }}>
+                      <td data-label="Thao tác" style={{ textAlign: "right" }}>
                         <button
                           className="btn btn-primary btn-sm"
                           style={{ padding: "4px 8px", fontSize: 12 }}
@@ -347,11 +347,11 @@ export default function UnassignedIssues() {
           </table>
         </div>
         {totalPages > 1 && (
-          <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--bg-card)", borderBottomLeftRadius: 10, borderBottomRightRadius: 10 }}>
+          <div className="unassigned-pagination" style={{ padding: "12px 16px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--bg-card)", borderBottomLeftRadius: 10, borderBottomRightRadius: 10 }}>
             <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
               Hiển thị {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, issues.length)} / {issues.length} task
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="unassigned-pagination-actions" style={{ display: "flex", gap: 8 }}>
               <button className="btn btn-secondary btn-sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>Trước</button>
               <div style={{ display: "flex", alignItems: "center", padding: "0 8px", fontSize: 13, fontWeight: 500 }}>
                 Trang {page} / {totalPages}

@@ -1,145 +1,155 @@
-import { getMyIssues, getTransitions, transitionIssue, addWorklog, getJiraFields, generateAiOutput } from "./jiraService";
-import { JIRA_PROJECTS } from "./config";
+import {
+  addWorklog,
+  generateAiOutput,
+  getAllIssuesByJql,
+  getJiraFields,
+  getTransitions,
+  JiraIssue,
+  parseTimeToSeconds,
+  transitionIssue,
+} from "./jiraService";
+import { getAutoResolveIssueKeys, removeAutoResolveIssueKey } from "./stores/autoResolveStore";
+
+function escapeJqlKey(key: string): string {
+  return key.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+}
+
+function isResolvedOrClosed(issue: JiraIssue): boolean {
+  const statusName = issue.fields.status?.name?.toLowerCase() || "";
+  return (
+    statusName.includes("resolve") ||
+    statusName.includes("closed") ||
+    statusName.includes("done") ||
+    statusName.includes("đóng") ||
+    statusName.includes("hoàn thành") ||
+    statusName.includes("đã giải quyết")
+  );
+}
+
+function parseEstimateSeconds(issue: JiraIssue): number {
+  const seconds = issue.fields.timetracking?.originalEstimateSeconds || 0;
+  if (seconds > 0) return seconds;
+  const textEstimate = issue.fields.timetracking?.originalEstimate;
+  return textEstimate ? parseTimeToSeconds(textEstimate) : 0;
+}
+
+function getLoggedSeconds(issue: JiraIssue): number {
+  return issue.fields.timetracking?.timeSpentSeconds || issue.fields.aggregatetimespent || 0;
+}
+
+function toStartOfLocalDay(date: Date): Date {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function formatJiraDateTime(date: Date, hour = 17, minute = 0): string {
+  const d = new Date(date);
+  d.setHours(hour, minute, 0, 0);
+
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const offset = -d.getTimezoneOffset();
+  const sign = offset >= 0 ? "+" : "-";
+  const offsetHours = String(Math.floor(Math.abs(offset) / 60)).padStart(2, "0");
+  const offsetMins = String(Math.abs(offset) % 60).padStart(2, "0");
+
+  return `${year}-${month}-${day}T${hh}:${mm}:00.000${sign}${offsetHours}${offsetMins}`;
+}
+
+async function buildResolveFields(summary: string) {
+  const output = await generateAiOutput(summary);
+  const fields: Record<string, unknown> = {
+    resolution: { id: "10000" },
+    customfield_10304: output,
+  };
+
+  try {
+    const allFields = await getJiraFields();
+    const outputField = allFields.find((field: any) => {
+      const name = String(field.name || "").trim().toLowerCase();
+      return name === "output" || name === "out put";
+    });
+    if (outputField?.id) {
+      fields[outputField.id] = output;
+    }
+  } catch (err) {
+    console.warn("Failed to load Jira output field metadata", err);
+  }
+
+  return fields;
+}
+
+function findResolveTransition(transitions: { id: string; name: string; to: { name: string } }[]) {
+  const resolveKeywords = ["resolve", "resolved", "giải quyết", "đã giải quyết"];
+  return transitions.find((transition) => {
+    const name = transition.name.toLowerCase();
+    const toName = transition.to.name.toLowerCase();
+    return resolveKeywords.some(keyword => name.includes(keyword) || toName.includes(keyword));
+  });
+}
 
 export async function silentAutoProcessTasks(onProgress?: (msg: string) => void) {
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
   if (!isConfigured) return;
 
+  const scheduledKeys = getAutoResolveIssueKeys();
+  if (scheduledKeys.length === 0) return;
+
   try {
-    const projectKeys = JIRA_PROJECTS.map((p) => p.key);
-    const result = await getMyIssues({ projectKeys, maxResults: 100 });
-    const issues = result.issues;
+    const quotedKeys = scheduledKeys.map(key => `"${escapeJqlKey(key)}"`).join(",");
+    const issues = await getAllIssuesByJql(`key in (${quotedKeys})`, scheduledKeys.length);
+    const now = toStartOfLocalDay(new Date());
 
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-
-    let inProgressCount = 0;
-    let closedCount = 0;
+    let resolvedCount = 0;
+    let loggedCount = 0;
 
     for (const issue of issues) {
-      const statusName = issue.fields.status?.name?.toLowerCase() || "";
-      const isDone =
-        statusName.includes("close") ||
-        statusName.includes("resolve") ||
-        statusName.includes("cancel") ||
-        statusName.includes("done") ||
-        statusName.includes("hủy") ||
-        statusName.includes("đóng") ||
-        statusName.includes("hoàn thành") ||
-        statusName.includes("đã giải quyết");
-
-      if (isDone) continue;
-
-      const startDateStr = issue.fields.customfield_10300;
-      const dueDateStr = issue.fields.duedate || issue.fields.customfield_10302;
-      
-      const startDate = startDateStr ? new Date(startDateStr) : null;
-      if (startDate) startDate.setHours(0, 0, 0, 0);
-
-      const dueDate = dueDateStr ? new Date(dueDateStr) : null;
-      if (dueDate) dueDate.setHours(0, 0, 0, 0);
-
-      const isToDo = statusName === "open" || statusName === "to do" || statusName === "mở" || statusName === "cần làm";
-
-      // Rule 2: Due Date <= Today -> Log Work & Close
-      if (dueDate && dueDate <= now) {
-        // Calculate remaining to log
-        const est = issue.fields.timetracking?.originalEstimateSeconds || 0;
-        const logged = issue.fields.timetracking?.timeSpentSeconds || 0;
-        
-        let toLog = 0;
-        if (est > 0 && logged < est) {
-          toLog = est - logged;
-        } else if (est === 0 && logged === 0) {
-          toLog = 8 * 3600; // default 8 hours if no estimate and hasn't logged
-        }
-
-        if (toLog > 0) {
-          try {
-            await addWorklog(issue.key, {
-              timeSpentSeconds: toLog,
-              comment: "Tự động log work khi đến Due Date",
-            });
-          } catch (e) {
-            console.warn(`Failed to auto-log for ${issue.key}`, e);
-          }
-        }
-
-        // Transition to closed
-        try {
-          const transitions = await getTransitions(issue.key);
-          const closedKeywords = ["closed", "đóng", "resolved", "done", "đã giải quyết", "hoàn thành", "fixed"];
-          const toClosed = transitions.find(t => 
-            closedKeywords.includes(t.to.name.toLowerCase()) || 
-            closedKeywords.some(kw => t.name.toLowerCase().includes(kw))
-          );
-          if (toClosed) {
-            const allFields = await getJiraFields();
-            const outputField = allFields.find(f => f.name.toLowerCase() === "output" || f.name.toLowerCase() === "out put");
-            const transitionFields: any = { resolution: { id: "10000" } };
-            if (outputField) {
-               const aiOutput = await generateAiOutput(issue.fields.summary);
-               transitionFields[outputField.id] = aiOutput;
-            }
-
-            await transitionIssue(issue.key, toClosed.id, transitionFields);
-            closedCount++;
-            
-            // Nếu là Bug thì xử lý bước Commit
-            let newTransitions = await getTransitions(issue.key);
-            const isBug = issue.fields.issuetype?.name?.toLowerCase().includes("bug");
-            if (isBug) {
-              let toCommit = newTransitions.find(t => t.to.name.toLowerCase().includes("commit") || t.name.toLowerCase().includes("commit"));
-              if (toCommit) {
-                await transitionIssue(issue.key, toCommit.id);
-                newTransitions = await getTransitions(issue.key);
-              }
-            }
-            
-            // Nếu là UAT bug thì xử lý thêm bước UAT
-            const isUatBug = issue.fields.issuetype?.name?.toLowerCase() === "uat bug";
-            if (isUatBug) {
-              let toUat = newTransitions.find(t => t.to.name.toLowerCase().includes("uat") || t.name.toLowerCase().includes("uat"));
-              if (toUat) {
-                await transitionIssue(issue.key, toUat.id);
-                newTransitions = await getTransitions(issue.key);
-              }
-            }
-            
-            let toRealClosed = newTransitions.find(t => t.to.name.toLowerCase() === "closed" || t.to.name.toLowerCase() === "đóng" || t.name.toLowerCase().includes("close"));
-            if (toRealClosed) {
-              await transitionIssue(issue.key, toRealClosed.id);
-            }
-          }
-        } catch (e) {
-          console.warn(`Failed to auto-close ${issue.key}`, e);
-        }
-      } 
-      // Rule 1: Start Date <= Today and is To Do -> Move to In Progress
-      else if (startDate && startDate <= now && isToDo) {
-        try {
-          const transitions = await getTransitions(issue.key);
-          const inprogressKeywords = ["in progress", "đang thực hiện", "đang làm"];
-          const toInProgress = transitions.find(t => 
-            inprogressKeywords.includes(t.to.name.toLowerCase()) || 
-            inprogressKeywords.some(kw => t.name.toLowerCase().includes(kw))
-          );
-          if (toInProgress) {
-            await transitionIssue(issue.key, toInProgress.id);
-            inProgressCount++;
-          }
-        } catch (e) {
-          console.warn(`Failed to move ${issue.key} to In Progress`, e);
-        }
+      if (isResolvedOrClosed(issue)) {
+        removeAutoResolveIssueKey(issue.key);
+        continue;
       }
+
+      const endDateStr = issue.fields.customfield_10302 || issue.fields.duedate;
+      if (!endDateStr) continue;
+
+      const endDate = toStartOfLocalDay(new Date(endDateStr));
+      if (Number.isNaN(endDate.getTime()) || endDate > now) continue;
+
+      const estimateSeconds = parseEstimateSeconds(issue);
+      const loggedSeconds = getLoggedSeconds(issue);
+      const secondsToLog = Math.max(0, estimateSeconds - loggedSeconds);
+
+      if (secondsToLog > 0) {
+        await addWorklog(issue.key, {
+          timeSpentSeconds: secondsToLog,
+          comment: "Tự động log work theo estimate khi đến End Date",
+          started: formatJiraDateTime(new Date(endDateStr)),
+          adjustEstimate: "auto",
+        });
+        loggedCount++;
+      }
+
+      const transitions = await getTransitions(issue.key);
+      const resolveTransition = findResolveTransition(transitions);
+      if (!resolveTransition) {
+        console.warn(`No Resolve transition found for ${issue.key}`);
+        continue;
+      }
+
+      const resolveFields = await buildResolveFields(issue.fields.summary);
+      await transitionIssue(issue.key, resolveTransition.id, resolveFields);
+      removeAutoResolveIssueKey(issue.key);
+      resolvedCount++;
     }
 
-    if (inProgressCount > 0 || closedCount > 0) {
-      if (onProgress) {
-        onProgress(`⚡ Auto-Process: Đã tự chuyển ${inProgressCount} task sang In Progress, tự log & đóng ${closedCount} task.`);
-      }
+    if ((resolvedCount > 0 || loggedCount > 0) && onProgress) {
+      onProgress(`Auto resolve: đã log ${loggedCount} task theo estimate và chuyển Resolve ${resolvedCount} task.`);
     }
   } catch (err) {
-    console.error("Auto process failed", err);
+    console.error("Auto resolve process failed", err);
   }
 }

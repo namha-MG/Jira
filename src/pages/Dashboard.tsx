@@ -85,6 +85,21 @@ function isDateInRange(date: Date, range?: { start: Date; end: Date }): boolean 
   return time >= range.start.getTime() && time <= range.end.getTime();
 }
 
+function parseJiraDate(value?: string): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getIssueClosedDate(issue: JiraIssue): Date | null {
+  if (!isClosedForDashboard(issue)) return null;
+  return (
+    parseJiraDate(issue.fields.resolutiondate) ||
+    parseJiraDate(issue.fields.customfield_10302) ||
+    parseJiraDate(issue.fields.updated)
+  );
+}
+
 function getIssueWorklogSeconds(
   issue: JiraIssue,
   currentUser: JiraUser | null,
@@ -98,6 +113,14 @@ function getIssueWorklogSeconds(
 
     return sum + (worklog.timeSpentSeconds || 0);
   }, 0) || 0;
+}
+
+function getClosedIssueWorklogSeconds(issue: JiraIssue, currentUser: JiraUser | null): number {
+  if (issue.fields.worklog) {
+    return getIssueWorklogSeconds(issue, currentUser);
+  }
+
+  return getIssueLoggedSeconds(issue);
 }
 
 function getTeamAssigneeKey(issue: JiraIssue): string {
@@ -678,6 +701,9 @@ export default function Dashboard() {
 
     if (timeRange === "all") return true;
 
+    const closedDate = getIssueClosedDate(i);
+    if (selectedRange && closedDate && isDateInRange(closedDate, selectedRange)) return true;
+
     // Giữ lại issue nếu nó được cập nhật trong khoảng thời gian này
     const updatedDate = new Date(i.fields.updated);
     if (selectedRange && isDateInRange(updatedDate, selectedRange)) return true;
@@ -701,8 +727,9 @@ export default function Dashboard() {
 
   // Tính tổng thời gian đã log: chỉ tính những ticket đã được closed
   const totalLogged = filteredIssues.reduce((sum, issue) => {
-    if (!isClosedForDashboard(issue)) return sum;
-    return sum + getIssueWorklogSeconds(issue, currentUser, selectedRange);
+    const closedDate = getIssueClosedDate(issue);
+    if (!closedDate || !isDateInRange(closedDate, selectedRange)) return sum;
+    return sum + getClosedIssueWorklogSeconds(issue, currentUser);
   }, 0);
 
   const totalRemaining = filteredIssues.reduce((s, i) => {
@@ -1064,7 +1091,7 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
         </div>
 
         {/* Bộ lọc thời gian */}
-        <div style={{ display: "flex", gap: 6, marginLeft: "auto", alignItems: "center" }}>
+        <div className="dashboard-time-filter" style={{ display: "flex", gap: 6, marginLeft: "auto", alignItems: "center" }}>
           <NotificationBell />
           <button
             className={`btn btn-sm ${timeRange === "month" ? "btn-primary" : "btn-secondary"}`}
@@ -1089,7 +1116,7 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
           </button>
         </div>
 
-        <div className="page-actions" style={{ marginLeft: 0, display: "flex", gap: 8 }}>
+        <div className="page-actions dashboard-action-row" style={{ marginLeft: 0, display: "flex", gap: 8 }}>
           {(() => {
             const isNamha = currentUser?.emailAddress?.includes("namha@etc.vn") || currentUser?.name?.includes("namha@etc.vn");
             const authStr = localStorage.getItem("authorized_close_team") || "";
@@ -1255,7 +1282,7 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
                 <button onClick={() => setShowTeamCloseModal(false)} className="btn btn-ghost btn-sm">❌</button>
               </div>
 
-              <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "grid", gridTemplateColumns: "minmax(180px, 240px) minmax(220px, 1fr) auto", gap: 12, alignItems: "center" }}>
+              <div className="team-close-filter-grid" style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "grid", gridTemplateColumns: "minmax(180px, 240px) minmax(220px, 1fr) auto", gap: 12, alignItems: "center" }}>
                 <div style={{ minWidth: 0 }}>
                   <UserSelect
                     users={[
@@ -1588,7 +1615,7 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
               </div>
 
               {timeRange !== "all" && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 16 }}>
+                <div className="dashboard-kpi-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 16 }}>
                   {/* Cấu hình thời gian */}
                   <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -1715,7 +1742,7 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
             </div>
 
             {/* Weekly Statistics Section */}
-            <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 16, marginBottom: 16 }}>
+            <div className="dashboard-section-grid" style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 16, marginBottom: 16 }}>
               {/* Weekly bar chart */}
               <div className="chart-card">
                 <div className="chart-title">Nỗ lực log work trong tuần này</div>
@@ -1744,7 +1771,7 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
                   <div className="chart-subtitle">So sánh nỗ lực tuần này với tuần trước</div>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, margin: "16px 0" }}>
+                <div className="dashboard-mini-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, margin: "16px 0" }}>
                   <div style={{ background: "rgba(16, 185, 129, 0.05)", border: "1px solid rgba(16, 185, 129, 0.15)", borderRadius: 12, padding: "14px 16px" }}>
                     <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Tuần này</div>
                     <div style={{ fontSize: 24, fontWeight: 800, color: "var(--accent-green)" }}>
@@ -1795,7 +1822,7 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
             </div>
 
             {/* Charts grid */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16, marginBottom: 16 }}>
+            <div className="dashboard-chart-grid" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16, marginBottom: 16 }}>
               {/* Bar chart by project */}
               <div className="chart-card">
                 <div className="chart-title">Giờ theo Project</div>
@@ -1867,7 +1894,7 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
               </div>
 
               {/* Summary bars */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div className="dashboard-mini-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
                 <div style={{ background: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.2)", borderRadius: 12, padding: "12px 14px" }}>
                   <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Quá estimate (total)</div>
                   <div style={{ fontSize: 18, fontWeight: 800, color: "var(--accent-red)" }}>

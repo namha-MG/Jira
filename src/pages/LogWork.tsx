@@ -431,7 +431,7 @@ export default function LogWork() {
             <p className="empty-state-text">Vào Cài đặt để nhập Jira PAT token trước.</p>
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20, alignItems: "start" }}>
+          <div className="logwork-layout">
             {/* Form */}
             <div className="settings-section">
               <div className="settings-section-title">📝 Nhập worklog mới</div>
@@ -440,7 +440,7 @@ export default function LogWork() {
               <form onSubmit={handleSubmit}>
                 <div className="form-group">
                   <label htmlFor="input-issue-key">Danh sách Issue Keys *</label>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div className="field-stack">
                     <textarea
                       id="input-issue-key"
                       placeholder="Nhập các Issue Key, phân tách bằng dấu phẩy hoặc xuống dòng (Ví dụ: BXDCSDL-123)... Hoặc chọn từ danh sách bên dưới"
@@ -476,20 +476,18 @@ export default function LogWork() {
                       ))}
                     </select>
 
-                    <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                    <div className="logwork-filter-row">
                       <input
                         type="text"
                         placeholder="🔍 Lọc Assignee (Để trống = Bản thân)"
                         value={assigneeFilter}
                         onChange={(e) => setAssigneeFilter(e.target.value)}
-                        style={{ fontSize: 12, padding: "8px 12px", flex: 1 }}
                       />
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
                         onClick={fetchSuggestedIssues}
                         disabled={loadingIssues}
-                        style={{ fontSize: 12, whiteSpace: "nowrap" }}
                       >
                         {loadingIssues ? "Đang tải..." : "Lọc Task"}
                       </button>
@@ -503,14 +501,13 @@ export default function LogWork() {
                 {currentTasksCount === 1 && (
                   <div className="form-group">
                     <label>Ngày giờ bắt đầu Log Work</label>
-                    <div style={{ display: "flex", gap: 8 }}>
+                    <div className="logwork-date-time">
                       <input
                         type="date"
                         value={logDate}
                         onChange={(e) => setLogDate(e.target.value)}
                         disabled={submitting}
                         required
-                        style={{ flex: 1 }}
                       />
                       <input
                         type="time"
@@ -518,7 +515,6 @@ export default function LogWork() {
                         onChange={(e) => setLogTime(e.target.value)}
                         disabled={submitting}
                         required
-                        style={{ width: "auto" }}
                       />
                     </div>
                     <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
@@ -545,24 +541,13 @@ export default function LogWork() {
 
 
                 <div className="form-group">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <div className="form-header-row">
                     <label htmlFor="input-comment" style={{ margin: 0 }}>Ghi chú công việc</label>
                     <button
                       type="button"
-                      className="btn btn-ghost btn-sm"
+                      className="btn btn-ghost btn-sm ai-note-btn"
                       onClick={handleGenerateAiComment}
                       disabled={generatingAi}
-                      style={{ 
-                        padding: "4px 8px", 
-                        fontSize: 12, 
-                        display: "flex", 
-                        alignItems: "center", 
-                        gap: 6, 
-                        background: "rgba(16, 185, 129, 0.08)", 
-                        border: "1px solid rgba(16, 185, 129, 0.2)",
-                        color: "var(--accent-green)",
-                        borderRadius: 6
-                      }}
                     >
                       {generatingAi ? (
                         <>
@@ -614,10 +599,10 @@ export default function LogWork() {
             </div>
 
             {/* Tips */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div className="logwork-side-panel">
               <div className="settings-section">
                 <div className="settings-section-title">💡 Hướng dẫn nhập thời gian</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
+                <div className="time-example-list">
                   {[
                     { input: "2h", desc: "2 giờ" },
                     { input: "30m", desc: "30 phút" },
@@ -625,11 +610,10 @@ export default function LogWork() {
                     { input: "1d", desc: "1 ngày (8 giờ)" },
                     { input: "1d 2h", desc: "1 ngày 2 giờ (10 giờ)" },
                   ].map((ex) => (
-                    <div key={ex.input} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div key={ex.input} className="time-example-row">
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
-                        style={{ fontFamily: "monospace", minWidth: 70 }}
                         onClick={() => setTimeSpent(ex.input)}
                       >
                         {ex.input}
@@ -642,14 +626,13 @@ export default function LogWork() {
 
               <div className="settings-section">
                 <div className="settings-section-title">🚀 Project Keys</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+                <div className="project-key-list">
                   {JIRA_PROJECTS.map((p) => (
-                    <div key={p.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div key={p.key} className="project-key-row">
                       <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>{p.name}</span>
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
-                        style={{ fontFamily: "monospace", fontSize: 11 }}
                         onClick={() => {
                           const key = p.key;
                           setIssueKeysText((prev) => prev ? `${prev}\n${key}-` : `${key}-`);

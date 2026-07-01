@@ -96,6 +96,7 @@ export type JiraIssue = {
     };
     created: string;
     updated: string;
+    resolutiondate?: string;
     duedate?: string;
     project: { key: string; name: string };
     issuetype: { name: string; iconUrl: string };
@@ -208,7 +209,7 @@ export async function getIssuesByProject(
 
   const fields = options.fields || [
     "summary", "status", "priority", "assignee", "reporter",
-    "timetracking", "worklog", "created", "updated", "duedate",
+    "timetracking", "worklog", "created", "updated", "resolutiondate", "duedate",
     "project", "issuetype", "description", "customfield_10300", "attachment",
   ];
 
@@ -248,7 +249,7 @@ export async function getMyIssues(options: {
     jql = `project in (${projectFilter}) AND (assignee = ${assigneeSelector} OR worklogAuthor = ${assigneeSelector}) ORDER BY updated DESC`;
   }
 
-  const fields = "summary,status,priority,assignee,timetracking,aggregatetimespent,aggregatetimeoriginalestimate,aggregateprogress,worklog,created,updated,duedate,project,issuetype,customfield_10300,customfield_10302,parent,attachment";
+  const fields = "summary,status,priority,assignee,timetracking,aggregatetimespent,aggregatetimeoriginalestimate,aggregateprogress,worklog,created,updated,resolutiondate,duedate,project,issuetype,customfield_10300,customfield_10302,parent,attachment";
   const pageSize = Math.min(maxResults, 100);
   let startAt = 0;
   let allIssues: JiraIssue[] = [];
@@ -288,7 +289,7 @@ export async function getAllIssuesByJql(
 ): Promise<JiraIssue[]> {
   const fields = [
     "summary", "status", "priority", "assignee", "reporter",
-    "timetracking", "worklog", "created", "updated", "duedate",
+    "timetracking", "worklog", "created", "updated", "resolutiondate", "duedate",
     "project", "issuetype", "description", "customfield_10300", "customfield_10302", "parent", "subtasks", "attachment"
   ];
   let allIssues: JiraIssue[] = [];
@@ -322,7 +323,8 @@ export async function getIssuesByJqlPage(
 ): Promise<{ issues: JiraIssue[]; total: number; startAt: number; maxResults: number }> {
   const fields = [
     "summary", "status", "priority", "assignee", "reporter",
-    "timetracking", "worklog", "created", "updated", "duedate",
+    "timetracking", "aggregatetimespent", "aggregatetimeoriginalestimate", "aggregateprogress",
+    "worklog", "created", "updated", "resolutiondate", "duedate",
     "project", "issuetype", "description", "customfield_10300", "customfield_10302", "parent", "subtasks", "attachment"
   ];
 
@@ -920,7 +922,7 @@ export async function getSprints(boardId: number, state?: string): Promise<JiraS
 }
 
 export async function getIssuesInSprint(sprintId: number, startAt: number = 0, maxResults: number = 100): Promise<{ issues: JiraIssue[]; total: number }> {
-  const fields = "summary,status,priority,assignee,timetracking,aggregatetimespent,aggregatetimeoriginalestimate,aggregateprogress,worklog,created,updated,duedate,project,issuetype,customfield_10300,customfield_10302,parent,attachment";
+  const fields = "summary,status,priority,assignee,timetracking,aggregatetimespent,aggregatetimeoriginalestimate,aggregateprogress,worklog,created,updated,resolutiondate,duedate,project,issuetype,customfield_10300,customfield_10302,parent,attachment";
   const res = await jiraAgileApi.get(`/sprint/${sprintId}/issue`, {
     params: { startAt, maxResults, fields }
   });

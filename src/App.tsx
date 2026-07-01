@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useIsAuthenticated, useMsal } from "@azure/msal-react";
 import { HashRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
@@ -11,6 +11,7 @@ import BulkCreate from "./pages/BulkCreate";
 import JobLogs from "./pages/JobLogs";
 import Teams from "./pages/Teams";
 import UnassignedIssues from "./pages/UnassignedIssues";
+import { silentAutoProcessTasks } from "./autoProcessor";
 
 export default function App() {
   const isAuthenticated = useIsAuthenticated();
@@ -26,6 +27,18 @@ export default function App() {
       console.warn("Msal logout skipped in bypass mode");
     }
   }, [instance]);
+
+  useEffect(() => {
+    if (!isAuthenticated && !bypassAuth) return;
+
+    const runAutoResolve = () => {
+      silentAutoProcessTasks().catch((err) => console.warn("Auto resolve skipped", err));
+    };
+
+    runAutoResolve();
+    const interval = window.setInterval(runAutoResolve, 5 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [isAuthenticated, bypassAuth]);
 
   if (!isAuthenticated && !bypassAuth) {
     return (

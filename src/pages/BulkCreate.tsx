@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useSyncExternalStore } from "react";
 import * as XLSX from "xlsx";
-import { createIssue, createSubTask, addWorklog, JiraIssue, JiraUser, getLatestTaskDate, getAssignableUsers, getAllIssuesByJql, getBoards, getSprints, moveIssuesToSprint, JiraSprint } from "../jiraService";
+import { createIssue, createSubTask, JiraIssue, JiraUser, getLatestTaskDate, getAssignableUsers, getAllIssuesByJql, getBoards, getSprints, moveIssuesToSprint, JiraSprint } from "../jiraService";
 import UserSelect from "../components/UserSelect";
 import { JIRA_PROJECTS } from "../config";
 import { copyToClipboard } from "../utils";
 import { bulkCreateStore, CreationLog } from "../stores/bulkCreateStore";
+import { addAutoResolveIssueKeys } from "../stores/autoResolveStore";
+import { silentAutoProcessTasks } from "../autoProcessor";
 
 export interface ManualTaskRow {
   id: string;
@@ -258,19 +260,8 @@ export default function BulkCreate() {
           customFields
         });
 
-        if (autoLogWork && formattedStartD) {
-          const startedStr = formattedStartD.replace(/\+.*$/, "+0000");
-          let logComment = `Thực hiện công việc: ${summary}`;
-          try {
-            await addWorklog(created.key, {
-              timeSpentSeconds: 7 * 3600, // default 7h for parent
-              comment: logComment,
-              started: startedStr,
-              adjustEstimate: "auto",
-            });
-          } catch(e) {
-            console.warn("Lỗi auto log work parent", e);
-          }
+        if (autoLogWork && formattedEndD) {
+          addAutoResolveIssueKeys([created.key]);
         }
 
         setLogs(prev => prev.map((l, idx) => idx === logIndex ? { ...l, status: "success", key: created.key } : l));
@@ -352,12 +343,14 @@ export default function BulkCreate() {
              setLogs(prev => prev.map((l, idx) => idx === targetIndex ? { ...l, status: "processing" } : l));
              
              let subCustomFields: any = {};
+             let subEndDateForAutoResolve = "";
              if (formattedStartD) {
                  subCustomFields["customfield_10300"] = formattedStartD;
                  const estHours = parseInt(sub.est.replace("h", "")) || 0;
                  if (estHours > 0) {
                      const subEndD = addWorkingHours(formattedStartD, estHours);
-                     subCustomFields["customfield_10302"] = formatJiraIsoDate(subEndD, 17, 0);
+                     subEndDateForAutoResolve = formatJiraIsoDate(subEndD, 17, 0);
+                     subCustomFields["customfield_10302"] = subEndDateForAutoResolve;
                  }
              }
 
@@ -371,22 +364,8 @@ export default function BulkCreate() {
                   customFields: Object.keys(subCustomFields).length > 0 ? subCustomFields : undefined
                 });
 
-                if (autoLogWork && formattedStartD) {
-                  const startedStr = formattedStartD.replace(/\+.*$/, "+0000");
-                  let logComment = `Thực hiện công việc: ${sub.title}`;
-                  const estHours = parseInt(sub.est.replace("h", "")) || 0;
-                  if (estHours > 0) {
-                    try {
-                      await addWorklog(sCreated.key, {
-                        timeSpentSeconds: estHours * 3600, // log = estimate
-                        comment: logComment,
-                        started: startedStr,
-                        adjustEstimate: "auto",
-                      });
-                    } catch(e) {
-                      console.warn("Lỗi auto log work subtask", e);
-                    }
-                  }
+                if (autoLogWork && subEndDateForAutoResolve) {
+                  addAutoResolveIssueKeys([sCreated.key]);
                 }
 
                 setLogs(prev => prev.map((l, idx) => idx === targetIndex ? { ...l, status: "success", key: sCreated.key } : l));
@@ -410,6 +389,10 @@ export default function BulkCreate() {
       } catch (err) {
         console.warn("Lỗi gán sprint", err);
       }
+    }
+
+    if (autoLogWork && createdKeys.length > 0) {
+      void silentAutoProcessTasks().catch(err => console.warn("Auto resolve after Excel create failed", err));
     }
 
     setIsRunning(false);
@@ -446,14 +429,12 @@ export default function BulkCreate() {
       let taskEstimate: string | undefined = estimate;
       let taskAutoLogWork = autoLogWork;
       let taskLogDate = currentLogDate;
-      let taskLogStartDateStr = "";
 
       if (summaries[i].isManualRow) {
         const row = summaries[i];
         if (row.startDate) {
           taskLogDate = new Date(row.startDate);
           taskStartDateStr = formatJiraIsoDate(taskLogDate, 8, 0);
-          taskLogStartDateStr = taskLogDate.toISOString().replace("Z", "+0000");
         } else {
           taskLogDate = new Date(); // Fallback for logDateFormatted
         }
@@ -472,10 +453,16 @@ export default function BulkCreate() {
         }
         taskStartDateStr = formatJiraIsoDate(taskLogDate, 8, 0);
         taskEndDateStr = formatJiraIsoDate(taskLogDate, 17, 0);
-        taskLogStartDateStr = taskLogDate.toISOString().replace("Z", "+0000");
       }
 
       const logDateFormatted = taskLogDate.toLocaleDateString("vi-VN", {
+        weekday: "short",
+        year: "numeric",
+        month: "numeric",
+        day: "numeric",
+      });
+      const autoResolveDate = taskEndDateStr ? new Date(taskEndDateStr) : taskLogDate;
+      const autoResolveDateFormatted = autoResolveDate.toLocaleDateString("vi-VN", {
         weekday: "short",
         year: "numeric",
         month: "numeric",
@@ -489,7 +476,7 @@ export default function BulkCreate() {
                 ...log, 
                 status: "processing", 
                 logDateText: taskAutoLogWork 
-                  ? `Lên lịch log: ${logDateFormatted}` 
+                  ? `Lên lịch auto log & Resolve: ${autoResolveDateFormatted}`
                   : `Lên lịch gán ngày: ${logDateFormatted}` 
               } 
             : log
@@ -523,44 +510,8 @@ export default function BulkCreate() {
           createdKey = created.key;
         }
 
-        if (taskAutoLogWork && taskLogStartDateStr) {
-          let logComment = `Thực hiện công việc: ${summaries[i].summary}`;
-          const geminiKey = localStorage.getItem("gemini_api_key");
-          if (geminiKey) {
-            try {
-              const prompt = `Bạn là một kỹ sư phần mềm chuyên nghiệp. Hãy viết 1 câu ngắn gọn (dưới 15 từ) ghi chú lại công việc đã thực hiện cho task Jira có tiêu đề: "${summaries[i].summary}". Ví dụ: "Đã hoàn thành tối ưu hóa truy vấn SQL và sửa lỗi bộ lọc". Viết bằng tiếng Việt, trực tiếp, bắt đầu bằng từ hành động như "Hoàn thành...", "Cải tiến...", "Tối ưu...", "Sửa lỗi...", không dài dòng, không có phần giới thiệu, không thêm bất kỳ định dạng markdown hay dấu ngoặc kép nào xung quanh.`;
-              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-              });
-              if (response.ok) {
-                const data = await response.json();
-                const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-                if (text) {
-                  logComment = text;
-                }
-              }
-            } catch (e) {
-              console.warn("AI generation failed for worklog comment", e);
-            }
-          }
-
-          // Parse estimate string (e.g. "4h" -> 4 * 3600, "1d" -> 8 * 3600)
-          let loggedSeconds = 7 * 3600;
-          if (taskEstimate) {
-            const hMatch = taskEstimate.match(/(\d+)\s*h/);
-            const dMatch = taskEstimate.match(/(\d+)\s*d/);
-            if (hMatch) loggedSeconds = parseInt(hMatch[1]) * 3600;
-            else if (dMatch) loggedSeconds = parseInt(dMatch[1]) * 8 * 3600;
-          }
-
-          await addWorklog(createdKey, {
-            timeSpentSeconds: loggedSeconds,
-            comment: logComment,
-            started: taskLogStartDateStr,
-            adjustEstimate: "auto",
-          });
+        if (taskAutoLogWork && taskEndDateStr) {
+          addAutoResolveIssueKeys([createdKey]);
         }
 
         setLogs((prev) =>
@@ -586,6 +537,10 @@ export default function BulkCreate() {
       } catch (err) {
         console.warn("Lỗi gán sprint", err);
       }
+    }
+
+    if (createdKeys.length > 0) {
+      void silentAutoProcessTasks().catch(err => console.warn("Auto resolve after bulk create failed", err));
     }
 
     setIsRunning(false);
@@ -681,10 +636,10 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
       </div>
 
       <div className="page-body">
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, alignItems: "start" }}>
+        <div className="bulk-create-layout">
           {/* Cột 1: Nhập liệu */}
           <div className="settings-section">
-            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            <div className="bulk-mode-tabs">
               <button
                 className={`btn btn-sm ${creationMode === "manual" ? "btn-primary" : "btn-secondary"}`}
                 onClick={() => setCreationMode("manual")}
@@ -803,9 +758,9 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                 {analyzedTasks.length > 0 && (
                   <div style={{ marginTop: 24, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
                     <div className="settings-section-title" style={{ marginBottom: 12 }}>📝 Danh sách Task</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+                    <div className="bulk-ai-task-list">
                       {analyzedTasks.map((task, idx) => (
-                        <div key={idx} style={{ display: "flex", gap: 8 }}>
+                        <div key={idx} className="bulk-ai-task-row">
                           <input
                             type="text"
                             value={task.summary}
@@ -814,10 +769,9 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                               newTasks[idx].summary = e.target.value;
                               setAnalyzedTasks(newTasks);
                             }}
-                            style={{ flex: 1 }}
                             disabled={isRunning}
                           />
-                          <div style={{ width: "200px" }}>
+                          <div>
                             <UserSelect
                               users={assignableUsers}
                               value={task.assignee}
@@ -839,7 +793,6 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                               setAnalyzedTasks(newTasks);
                             }}
                             disabled={isRunning}
-                            style={{ padding: "0 12px" }}
                           >
                             🗑️
                           </button>
@@ -856,7 +809,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                       </button>
                     </div>
 
-                    <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
+                    <div className="form-group checkbox-row">
                       <input
                         id="checkbox-autolog-ai"
                         type="checkbox"
@@ -866,13 +819,13 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                         style={{ width: "auto", margin: 0, cursor: "pointer" }}
                       />
                       <label htmlFor="checkbox-autolog-ai" style={{ cursor: "pointer", fontWeight: "normal", fontSize: 13, userSelect: "none" }}>
-                        Tự động log work 7h cho mỗi issue sau khi tạo?
+                        Tự động log theo estimate và chuyển Resolve khi đến End Date?
                       </label>
                     </div>
 
                     <div className="form-group">
                       <label htmlFor="input-start-date-log-ai">
-                        {autoLogWork ? "Ngày bắt đầu log work *" : "Ngày bắt đầu của Task *"}
+                        Ngày bắt đầu của Task *
                       </label>
                       <input
                         id="input-start-date-log-ai"
@@ -946,7 +899,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                      <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 8 }}>
                        Đã đọc <strong>{excelData.length}</strong> dòng từ file.
                      </div>
-                     <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
+                     <div className="bulk-excel-preview">
                        <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
                          <thead style={{ background: "rgba(255,255,255,0.05)", position: "sticky", top: 0 }}>
                            <tr>
@@ -967,7 +920,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                        </table>
                      </div>
 
-                     <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
+                     <div className="form-group checkbox-row">
                        <input
                          id="checkbox-autolog-excel"
                          type="checkbox"
@@ -977,7 +930,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                          style={{ width: "auto", margin: 0, cursor: "pointer" }}
                        />
                        <label htmlFor="checkbox-autolog-excel" style={{ cursor: "pointer", fontWeight: "normal", fontSize: 13, userSelect: "none" }}>
-                         Tự động log work cho các issue/sub-task sau khi tạo?
+                         Tự động log theo estimate và chuyển Resolve khi đến End Date?
                        </label>
                      </div>
 
@@ -1002,7 +955,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                 <div className="settings-section-title">➕ Tạo hàng loạt Issue</div>
                 <div className="settings-section-desc">Mỗi dòng văn bản bên dưới sẽ được tạo thành một Issue riêng biệt.</div>
 
-                <div style={{ display: "flex", gap: 8, marginTop: 16, marginBottom: 16 }}>
+                <div className="bulk-manual-mode-tabs">
                   <button
                     type="button"
                     className={`btn btn-sm ${manualMode === "independent" ? "btn-primary" : "btn-secondary"}`}
@@ -1081,7 +1034,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                     </div>
                   )}
 
-                  <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
+                  <div className="form-group checkbox-row">
                     <input
                       id="checkbox-general-config"
                       type="checkbox"
@@ -1122,7 +1075,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                         />
                       </div>
 
-                      <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
+                      <div className="form-group checkbox-row">
                         <input
                           id="checkbox-autolog"
                           type="checkbox"
@@ -1132,13 +1085,13 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                           style={{ width: "auto", margin: 0, cursor: "pointer" }}
                         />
                         <label htmlFor="checkbox-autolog" style={{ cursor: "pointer", fontWeight: "normal", fontSize: 13, userSelect: "none" }}>
-                          Tự động log work 7h cho mỗi issue sau khi tạo?
+                          Tự động log theo estimate và chuyển Resolve khi đến End Date?
                         </label>
                       </div>
 
                       <div className="form-group">
                         <label htmlFor="input-start-date-log">
-                          {autoLogWork ? "Ngày bắt đầu log work *" : "Ngày bắt đầu của Task *"}
+                          Ngày bắt đầu của Task *
                         </label>
                         <input
                           id="input-start-date-log"
@@ -1151,60 +1104,75 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                       </div>
                     </>
                   ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+                    <div className="bulk-manual-list">
                       <label>Danh sách Task nhập thủ công</label>
+                      <div className="form-hint">
+                        Tick Auto Resolve để đến End Date hệ thống tự log theo Estimate và chuyển Resolve với Output.
+                      </div>
                       {manualRows.map((row, idx) => (
-                        <div key={row.id} style={{ display: "grid", gridTemplateColumns: "1fr 120px 120px 80px 60px 40px", gap: 8, alignItems: "center", background: "var(--bg-card)", padding: 12, borderRadius: 8, border: "1px solid var(--border)" }}>
-                          <input
-                            type="text"
-                            placeholder="Tóm tắt công việc (Summary)..."
-                            value={row.summary}
-                            onChange={(e) => {
-                              const newRows = [...manualRows];
-                              newRows[idx].summary = e.target.value;
-                              setManualRows(newRows);
-                            }}
-                            disabled={isRunning}
-                            required
-                          />
-                          <input
-                            type="date"
-                            title="Ngày Start"
-                            value={row.startDate}
-                            onChange={(e) => {
-                              const newRows = [...manualRows];
-                              newRows[idx].startDate = e.target.value;
-                              setManualRows(newRows);
-                            }}
-                            disabled={isRunning}
-                          />
-                          <input
-                            type="date"
-                            title="Ngày End"
-                            value={row.endDate}
-                            onChange={(e) => {
-                              const newRows = [...manualRows];
-                              newRows[idx].endDate = e.target.value;
-                              setManualRows(newRows);
-                            }}
-                            disabled={isRunning}
-                          />
-                          <input
-                            type="text"
-                            title="Estimate"
-                            placeholder="7h"
-                            value={row.estimate}
-                            onChange={(e) => {
-                              const newRows = [...manualRows];
-                              newRows[idx].estimate = e.target.value;
-                              setManualRows(newRows);
-                            }}
-                            disabled={isRunning}
-                          />
-                          <label style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, fontSize: 11, cursor: "pointer" }}>
+                        <div key={row.id} className="bulk-manual-row">
+                          <div className="bulk-manual-field bulk-manual-summary">
+                            <span className="field-label-mobile">Summary</span>
+                            <input
+                              type="text"
+                              placeholder="Tóm tắt công việc (Summary)..."
+                              value={row.summary}
+                              onChange={(e) => {
+                                const newRows = [...manualRows];
+                                newRows[idx].summary = e.target.value;
+                                setManualRows(newRows);
+                              }}
+                              disabled={isRunning}
+                              required
+                            />
+                          </div>
+                          <div className="bulk-manual-field">
+                            <span className="field-label-mobile">Start</span>
+                            <input
+                              type="date"
+                              title="Ngày Start"
+                              value={row.startDate}
+                              onChange={(e) => {
+                                const newRows = [...manualRows];
+                                newRows[idx].startDate = e.target.value;
+                                setManualRows(newRows);
+                              }}
+                              disabled={isRunning}
+                            />
+                          </div>
+                          <div className="bulk-manual-field">
+                            <span className="field-label-mobile">End</span>
+                            <input
+                              type="date"
+                              title="Ngày End"
+                              value={row.endDate}
+                              onChange={(e) => {
+                                const newRows = [...manualRows];
+                                newRows[idx].endDate = e.target.value;
+                                setManualRows(newRows);
+                              }}
+                              disabled={isRunning}
+                            />
+                          </div>
+                          <div className="bulk-manual-field">
+                            <span className="field-label-mobile">Estimate</span>
+                            <input
+                              type="text"
+                              title="Estimate"
+                              placeholder="7h"
+                              value={row.estimate}
+                              onChange={(e) => {
+                                const newRows = [...manualRows];
+                                newRows[idx].estimate = e.target.value;
+                                setManualRows(newRows);
+                              }}
+                              disabled={isRunning}
+                            />
+                          </div>
+                          <label className="bulk-manual-auto">
                             <input
                               type="checkbox"
-                              title="Auto Log Work"
+                              title="Auto log theo estimate và Resolve khi đến End Date"
                               checked={row.autoLogWork}
                               onChange={(e) => {
                                 const newRows = [...manualRows];
@@ -1214,16 +1182,15 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                               disabled={isRunning}
                               style={{ margin: 0 }}
                             />
-                            Log
+                            Auto Resolve
                           </label>
                           <button
                             type="button"
-                            className="btn btn-secondary btn-sm"
+                            className="btn btn-secondary btn-sm bulk-row-delete"
                             onClick={() => {
                               setManualRows(manualRows.filter((_, i) => i !== idx));
                             }}
                             disabled={isRunning || manualRows.length === 1}
-                            style={{ padding: 4 }}
                           >
                             🗑️
                           </button>
@@ -1262,27 +1229,13 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
           </div>
 
           {/* Cột 2: Trạng thái & Tiến độ */}
-          <div className="settings-section" style={{ minHeight: 460, display: "flex", flexDirection: "column" }}>
+          <div className="settings-section bulk-progress-card">
             <div className="settings-section-title">📊 Tiến trình thực hiện</div>
             <div className="settings-section-desc">Theo dõi trạng thái tạo tự động thời gian thực.</div>
 
-            <div
-              style={{
-                flex: 1,
-                background: "rgba(0,0,0,0.15)",
-                border: "1px solid var(--border)",
-                borderRadius: 10,
-                padding: 16,
-                marginTop: 16,
-                maxHeight: 440,
-                overflowY: "auto",
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-              }}
-            >
+            <div className="bulk-progress-list">
               {logs.length === 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", opacity: 0.5, padding: "40px 0" }}>
+                <div className="bulk-progress-empty">
                   <span style={{ fontSize: 32, marginBottom: 8 }}>📋</span>
                   <span style={{ fontSize: 13 }}>Danh sách trống.</span>
                 </div>
@@ -1290,43 +1243,27 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                 logs.map((log, idx) => (
                   <div
                     key={idx}
-                    style={{
-                      background: "var(--bg-card)",
-                      borderRadius: 8,
-                      padding: "10px 14px",
-                      border: "1px solid var(--border)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      fontSize: 13,
-                    }}
+                    className="bulk-progress-item"
                   >
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="bulk-progress-main">
                       <div
-                        style={{
-                          color: "var(--text-primary)",
-                          fontWeight: 500,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
+                        className="bulk-progress-title"
                       >
                         {log.summary}
                       </div>
                       {log.logDateText && (
-                        <div style={{ color: "var(--accent-blue-light)", fontSize: 11, marginTop: 2, fontWeight: 500 }}>
+                        <div className="bulk-progress-date">
                           📅 {log.logDateText}
                         </div>
                       )}
                       {log.errorMsg && (
-                        <div style={{ color: "var(--accent-red)", fontSize: 11, marginTop: 2 }}>
+                        <div className="bulk-progress-error">
                           ⚠️ {log.errorMsg}
                         </div>
                       )}
                     </div>
 
-                    <div style={{ flexShrink: 0 }}>
+                    <div className="bulk-progress-status">
                       {log.status === "pending" && (
                         <span style={{ color: "var(--text-muted)" }}>⏳ Đang chờ</span>
                       )}
@@ -1336,29 +1273,21 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                         </span>
                       )}
                       {log.status === "success" && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <div className="bulk-success-actions">
                           <a
                             href={`https://20.84.97.109:3033/browse/${log.key}`}
                             target="_blank"
                             rel="noreferrer"
-                            style={{
-                              color: "var(--accent-green)",
-                              fontWeight: 700,
-                              textDecoration: "none",
-                              background: "rgba(16, 185, 129, 0.1)",
-                              padding: "4px 8px",
-                              borderRadius: 6,
-                            }}
+                            className="bulk-success-link"
                           >
                             ✅ {log.key} ↗
                           </a>
                           <button
-                            className="btn btn-secondary btn-sm"
                             title="Copy Link"
                             onClick={() => {
                               copyToClipboard(`https://20.84.97.109:3033/browse/${log.key}`);
                             }}
-                            style={{ padding: "2px 6px", fontSize: 12, background: "transparent", border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer", color: "var(--text-secondary)" }}
+                            className="btn btn-secondary btn-sm bulk-copy-btn"
                           >
                             📋
                           </button>

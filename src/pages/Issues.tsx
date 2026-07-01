@@ -35,21 +35,6 @@ function isDateInRange(date: Date, range?: { start: Date; end: Date }): boolean 
   return time >= range.start.getTime() && time <= range.end.getTime();
 }
 
-function getIssueWorklogSeconds(
-  issue: JiraIssue,
-  currentUser: JiraUser | null,
-  range?: { start: Date; end: Date }
-): number {
-  return issue.fields.worklog?.worklogs?.reduce((sum, worklog) => {
-    if (!isWorklogByUser(worklog, currentUser)) return sum;
-
-    const worklogDate = new Date(worklog.started);
-    if (!isDateInRange(worklogDate, range)) return sum;
-
-    return sum + (worklog.timeSpentSeconds || 0);
-  }, 0) || 0;
-}
-
 function userMatchesFilter(user: JiraUser | null, filter: string): boolean {
   if (!user || filter === "all" || filter === "unassigned") return false;
   return userIdentityKeys(user).includes(filter.trim().toLowerCase());
@@ -408,9 +393,8 @@ export default function Issues() {
     userMatchesFilter(currentUser, assigneeFilter);
   const worklogUserForView = shouldUseCurrentUserWorklogs ? currentUser : null;
   const getLoggedForIssue = (issue: JiraIssue) => {
-    const logged = getIssueWorklogSeconds(issue, worklogUserForView, loggedRange);
-    if (logged > 0 || issue.fields.worklog?.worklogs?.length) return logged;
-    return issue.fields.timetracking?.timeSpentSeconds || 0;
+    const worklogTotal = issue.fields.worklog?.worklogs?.reduce((sum, wl) => sum + (wl.timeSpentSeconds || 0), 0) || 0;
+    return issue.fields.aggregatetimespent ?? issue.fields.timetracking?.timeSpentSeconds ?? worklogTotal;
   };
 
   // Filter + sort
@@ -534,9 +518,9 @@ export default function Issues() {
 
       <div className="page-body">
         {/* Filters */}
-        <div className="filter-bar" style={{ flexWrap: "wrap", gap: 12 }}>
+        <div className="filter-bar issues-filter-bar" style={{ flexWrap: "wrap", gap: 12 }}>
           {/* Project tabs */}
-          <div style={{ display: "flex", gap: 4 }}>
+          <div className="project-tab-list" style={{ display: "flex", gap: 4 }}>
             {JIRA_PROJECTS.map((p) => (
               <button
                 key={p.key}
@@ -550,7 +534,7 @@ export default function Issues() {
           </div>
 
           {/* Load Scope Tabs */}
-          <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.03)", padding: 3, borderRadius: 8, border: "1px solid var(--border)" }}>
+          <div className="segmented-control" style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.03)", padding: 3, borderRadius: 8, border: "1px solid var(--border)" }}>
             <button
               className={`btn btn-sm`}
               style={{
@@ -580,7 +564,7 @@ export default function Issues() {
           </div>
 
           {/* Time Filter Tabs */}
-          <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.03)", padding: 3, borderRadius: 8, border: "1px solid var(--border)" }}>
+          <div className="segmented-control" style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.03)", padding: 3, borderRadius: 8, border: "1px solid var(--border)" }}>
             <button
               className={`btn btn-sm`}
               style={{
@@ -609,7 +593,7 @@ export default function Issues() {
             </button>
           </div>
 
-          <div style={{ flex: 1, display: "flex", gap: 8, minWidth: 200, marginLeft: "auto" }}>
+          <div className="issues-filter-controls" style={{ flex: 1, display: "flex", gap: 8, minWidth: 200, marginLeft: "auto" }}>
             <input
               id="input-search-issues"
               type="text"
@@ -627,7 +611,7 @@ export default function Issues() {
               <option value="all">Tất cả status</option>
               {uniqueStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
-            <div style={{ position: "relative", width: 180 }}>
+            <div className="filter-field filter-type-field" style={{ position: "relative", width: 180 }}>
               <div 
                 onClick={() => setTypeDropdownOpen(!typeDropdownOpen)}
                 style={{ 
@@ -707,7 +691,7 @@ export default function Issues() {
                 </div>
               )}
             </div>
-            <div style={{ width: 150 }}>
+            <div className="filter-field filter-assignee-field" style={{ width: 150 }}>
               <UserSelect
                 users={[
                   { accountId: "all", displayName: "Tất cả Assignee", name: "all" } as JiraUser,
@@ -720,6 +704,7 @@ export default function Issues() {
               />
             </div>
             <select
+              className="filter-field"
               id="select-advanced-filter"
               value={advancedFilter}
               onChange={(e) => setAdvancedFilter(e.target.value)}
@@ -743,10 +728,11 @@ export default function Issues() {
             return sum + getLoggedForIssue(issue);
           }, 0);
           const totalFilteredLoggedHours = (totalFilteredLoggedSeconds / 3600).toFixed(1);
+          const issueTableLabels = ["Key", "Tóm tắt", "Người xử lý", "Trạng thái", "Loại", "Start Date", "Estimate", "Logged", "Tiến độ", "Cập nhật", "Hành động"];
 
           return (
             <div className="table-wrap">
-              <table>
+              <table className="issues-table">
                 <thead>
                   <tr>
                     <th onClick={() => handleSort("key")} style={{ cursor: "pointer" }}>Key{sortIndicator("key")}</th>
@@ -767,7 +753,7 @@ export default function Issues() {
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={i}>
                     {Array.from({ length: 11 }).map((__, j) => (
-                      <td key={j}><div className="skeleton" style={{ height: 16, borderRadius: 4 }} /></td>
+                      <td key={j} data-label={issueTableLabels[j]}><div className="skeleton" style={{ height: 16, borderRadius: 4 }} /></td>
                     ))}
                   </tr>
                 ))
@@ -814,7 +800,7 @@ export default function Issues() {
 
                   return (
                     <tr key={issue.id}>
-                      <td>
+                      <td data-label="Key">
                         <a
                           href={`https://20.84.97.109:3033/browse/${issue.key}`}
                           target="_blank"
@@ -824,12 +810,12 @@ export default function Issues() {
                           {issue.key}
                         </a>
                       </td>
-                      <td style={{ maxWidth: 280 }}>
+                      <td data-label="Tóm tắt" style={{ maxWidth: 280 }}>
                         <div title={issue.fields.summary} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)", fontSize: 13 }}>
                           {issue.fields.summary}
                         </div>
                       </td>
-                      <td>
+                      <td data-label="Người xử lý">
                         {issue.fields.assignee ? (
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <img
@@ -845,16 +831,16 @@ export default function Issues() {
                           <span style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>Chưa phân công</span>
                         )}
                       </td>
-                      <td>
+                      <td data-label="Trạng thái">
                         <span className={getBadgeClass(issue.fields.status.name)}>
                           {issue.fields.status.name}
                         </span>
                       </td>
-                      <td style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      <td data-label="Loại" style={{ fontSize: 11, color: "var(--text-muted)" }}>
                         {issue.fields.issuetype?.name || "—"}
                       </td>
-                      <td style={{ fontSize: 11, color: "var(--text-primary)" }}>{startDateStr}</td>
-                      <td style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 500 }}>
+                      <td data-label="Start Date" style={{ fontSize: 11, color: "var(--text-primary)" }}>{startDateStr}</td>
+                      <td data-label="Estimate" style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 500 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                           {est ? formatSeconds(est) : <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>—</span>}
                           <button 
@@ -870,10 +856,10 @@ export default function Issues() {
                           </button>
                         </div>
                       </td>
-                      <td style={{ fontSize: 12, color: "var(--accent-green)", fontWeight: 700 }}>
+                      <td data-label="Logged" style={{ fontSize: 12, color: "var(--accent-green)", fontWeight: 700 }}>
                         {log ? formatSeconds(log) : <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>—</span>}
                       </td>
-                      <td style={{ width: 100 }}>
+                      <td data-label="Tiến độ" style={{ width: 100 }}>
                         {est > 0 ? (
                           <div>
                             <div style={{ fontSize: 10, color: pct > 100 ? "var(--accent-red)" : "var(--text-muted)", marginBottom: 3 }}>{pct}%</div>
@@ -883,8 +869,8 @@ export default function Issues() {
                           </div>
                         ) : <span style={{ color: "var(--text-muted)", fontSize: 11 }}>—</span>}
                       </td>
-                      <td style={{ fontSize: 11, color: "var(--text-muted)" }}>{updatedDate}</td>
-                      <td>
+                      <td data-label="Cập nhật" style={{ fontSize: 11, color: "var(--text-muted)" }}>{updatedDate}</td>
+                      <td data-label="Hành động" className="issues-actions-cell">
                         <button
                           className="btn btn-ghost btn-sm"
                           style={{ padding: "4px 8px", fontSize: 14 }}

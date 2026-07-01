@@ -87,6 +87,19 @@ export default function Layout({ children, onLogout }: LayoutProps) {
       {/* Main */}
       <main className="main-content">{children}</main>
 
+      <nav className="mobile-nav" aria-label="Mobile navigation">
+        {navItems.map((item) => (
+          <NavLink
+            key={item.id}
+            to={item.path}
+            className={({ isActive }) => `mobile-nav-item ${isActive ? "active" : ""}`}
+          >
+            <span className="mobile-nav-icon">{item.icon}</span>
+            <span className="mobile-nav-label">{item.label}</span>
+          </NavLink>
+        ))}
+      </nav>
+
       <JobManager />
     </div>
   );
