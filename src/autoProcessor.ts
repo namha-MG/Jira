@@ -12,6 +12,7 @@ import {
   getActiveAutoResolveScheduleItems,
   markAutoResolveIssueStatus,
 } from "./stores/autoResolveStore";
+import type { AutoResolveScheduleItem } from "./stores/autoResolveStore";
 
 function escapeJqlKey(key: string): string {
   return key.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
@@ -61,6 +62,26 @@ function formatJiraDateTime(date: Date, hour = 17, minute = 0): string {
   const offsetMins = String(Math.abs(offset) % 60).padStart(2, "0");
 
   return `${year}-${month}-${day}T${hh}:${mm}:00.000${sign}${offsetHours}${offsetMins}`;
+}
+
+function formatJiraDateTimeFromField(dateStr: string, fallbackHour = 8): string {
+  const dateOnly = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly;
+    return formatJiraDateTime(new Date(Number(year), Number(month) - 1, Number(day)), fallbackHour, 0);
+  }
+
+  const parsed = new Date(dateStr);
+  if (Number.isNaN(parsed.getTime())) return dateStr;
+  return formatJiraDateTime(parsed, parsed.getHours(), parsed.getMinutes());
+}
+
+function getAutoWorklogStarted(issue: JiraIssue, scheduleItem: AutoResolveScheduleItem | undefined, endDateStr: string): string {
+  const startDateStr = issue.fields.customfield_10300 || scheduleItem?.startDate;
+  if (startDateStr) {
+    return formatJiraDateTimeFromField(startDateStr, 8);
+  }
+  return formatJiraDateTimeFromField(endDateStr, 17);
 }
 
 async function buildResolveFields(summary: string) {
@@ -122,6 +143,7 @@ export async function silentAutoProcessTasks(onProgress?: (msg: string) => void)
     let resolvedCount = 0;
     let loggedCount = 0;
     const foundKeys = new Set(issues.map(issue => issue.key));
+    const scheduledByKey = new Map(scheduledItems.map(item => [item.key, item]));
 
     for (const item of scheduledItems) {
       if (!foundKeys.has(item.key)) {
@@ -132,6 +154,7 @@ export async function silentAutoProcessTasks(onProgress?: (msg: string) => void)
     }
 
     for (const issue of issues) {
+      const scheduledItem = scheduledByKey.get(issue.key);
       try {
         markAutoResolveIssueStatus(issue.key, "processing", {
           ...getIssueScheduleFields(issue),
@@ -182,7 +205,7 @@ export async function silentAutoProcessTasks(onProgress?: (msg: string) => void)
           await addWorklog(issue.key, {
             timeSpentSeconds: secondsToLog,
             comment: "Tự động log work theo estimate khi đến End Date",
-            started: formatJiraDateTime(new Date(endDateStr)),
+            started: getAutoWorklogStarted(issue, scheduledItem, endDateStr),
             adjustEstimate: "auto",
           });
           loggedCount++;
