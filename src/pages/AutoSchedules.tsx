@@ -62,6 +62,14 @@ function getEndDate(item: AutoResolveScheduleItem, issue?: JiraIssue) {
   return issue?.fields.customfield_10302 || issue?.fields.duedate || item.endDate;
 }
 
+function getProjectKey(item: AutoResolveScheduleItem, issue?: JiraIssue) {
+  return issue?.fields.project?.key || item.projectKey || "";
+}
+
+function getAssigneeName(item: AutoResolveScheduleItem, issue?: JiraIssue) {
+  return issue?.fields.assignee?.displayName || item.assigneeName || "";
+}
+
 function isScheduleDue(item: AutoResolveScheduleItem, issue?: JiraIssue) {
   if (!activeStatuses.has(item.status)) return false;
   const endDate = parseOptionalDate(getEndDate(item, issue));
@@ -92,6 +100,8 @@ export default function AutoSchedules() {
   const [running, setRunning] = useState(false);
   const [filter, setFilter] = useState<ScheduleFilter>("active");
   const [searchText, setSearchText] = useState("");
+  const [projectFilter, setProjectFilter] = useState("all");
+  const [assigneeSearch, setAssigneeSearch] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -148,26 +158,61 @@ export default function AutoSchedules() {
 
   const filteredItems = useMemo(() => {
     const search = normalizeText(searchText);
+    const assigneeTerm = normalizeText(assigneeSearch.trim());
+    const unassignedLabel = normalizeText("Chưa gán");
     return items.filter(item => {
       const issue = issuesByKey[item.key];
+      const projectKey = getProjectKey(item, issue);
+      const assigneeName = getAssigneeName(item, issue);
       const matchesFilter =
         filter === "all" ||
         (filter === "active" && activeStatuses.has(item.status)) ||
         (filter === "due" && isScheduleDue(item, issue)) ||
         (filter === "completed" && (item.status === "completed" || item.status === "skipped")) ||
         (filter === "error" && item.status === "error");
+      const matchesProject = projectFilter === "all" || projectKey === projectFilter;
+      const matchesUnassignedSearch = !assigneeName.trim() && assigneeTerm.length >= 3 && unassignedLabel.includes(assigneeTerm);
+      const matchesAssignee =
+        !assigneeTerm ||
+        normalizeText(assigneeName).includes(assigneeTerm) ||
+        matchesUnassignedSearch;
 
       const haystack = normalizeText([
         item.key,
         issue?.fields.summary || item.summary,
-        issue?.fields.project?.key || item.projectKey,
-        issue?.fields.assignee?.displayName || item.assigneeName,
+        projectKey,
+        assigneeName,
         issue?.fields.status?.name,
       ].filter(Boolean).join(" "));
 
-      return matchesFilter && (!search || haystack.includes(search));
+      return matchesFilter && matchesProject && matchesAssignee && (!search || haystack.includes(search));
     });
-  }, [filter, issuesByKey, items, searchText]);
+  }, [assigneeSearch, filter, issuesByKey, items, projectFilter, searchText]);
+
+  const filterOptions = useMemo(() => {
+    const projects = new Set<string>();
+    const assignees = new Set<string>();
+    let hasUnassigned = false;
+
+    for (const item of items) {
+      const issue = issuesByKey[item.key];
+      const projectKey = getProjectKey(item, issue);
+      const assigneeName = getAssigneeName(item, issue).trim();
+
+      if (projectKey) projects.add(projectKey);
+      if (assigneeName) {
+        assignees.add(assigneeName);
+      } else {
+        hasUnassigned = true;
+      }
+    }
+
+    return {
+      projects: Array.from(projects).sort((a, b) => a.localeCompare(b)),
+      assignees: Array.from(assignees).sort((a, b) => a.localeCompare(b, "vi")),
+      hasUnassigned,
+    };
+  }, [issuesByKey, items]);
 
   const runNow = async () => {
     setRunning(true);
@@ -258,6 +303,25 @@ export default function AutoSchedules() {
             <option value="error">Lỗi</option>
             <option value="all">Tất cả</option>
           </select>
+          <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
+            <option value="all">Tất cả dự án</option>
+            {filterOptions.projects.map(projectKey => (
+              <option key={projectKey} value={projectKey}>{projectKey}</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={assigneeSearch}
+            onChange={(e) => setAssigneeSearch(e.target.value)}
+            placeholder="Tìm assignee..."
+            list="auto-schedule-assignee-options"
+          />
+          <datalist id="auto-schedule-assignee-options">
+            {filterOptions.hasUnassigned && <option value="Chưa gán" />}
+            {filterOptions.assignees.map(assigneeName => (
+              <option key={assigneeName} value={assigneeName} />
+            ))}
+          </datalist>
         </div>
 
         <div className="table-wrap auto-schedule-table-wrap">
