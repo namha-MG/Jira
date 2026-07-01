@@ -6,7 +6,7 @@ import {
 import {
   getMyIssues, JiraIssue, JiraWorklog, formatSeconds, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, getCurrentUser, getIssuesByJqlPage, getWorklogs, getAssignableUsers, JiraUser
 } from "../jiraService";
-import { JIRA_PROJECTS } from "../config";
+import { getDefaultProjectKey, getSelectedJiraProjects } from "../config";
 import NotificationBell from "../components/NotificationBell";
 import UserSelect from "../components/UserSelect";
 import { getHolidays } from "../utils";
@@ -191,6 +191,9 @@ function buildTeamCloseJql(
 }
 
 export default function Dashboard() {
+  const jiraProjects = getSelectedJiraProjects();
+  const projectOptionsKey = jiraProjects.map((project) => project.key).join("|");
+  const defaultProjectKey = getDefaultProjectKey();
   const [currentUser, setCurrentUser] = useState<JiraUser | null>(null);
   const [issues, setIssues] = useState<JiraIssue[]>([]);
   const [loading, setLoading] = useState(true);
@@ -219,7 +222,7 @@ export default function Dashboard() {
   const [selectedTargets, setSelectedTargets] = useState<Set<string>>(new Set());
 
   const [showTeamCloseModal, setShowTeamCloseModal] = useState(false);
-  const [teamSelectedProject, setTeamSelectedProject] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
+  const [teamSelectedProject, setTeamSelectedProject] = useState(() => defaultProjectKey);
   const [teamClosableTargets, setTeamClosableTargets] = useState<JiraIssue[]>([]);
   const [teamSelectedTargets, setTeamSelectedTargets] = useState<Set<string>>(new Set());
   const [teamLoadingTasks, setTeamLoadingTasks] = useState(false);
@@ -237,6 +240,12 @@ export default function Dashboard() {
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
+
+  useEffect(() => {
+    if (!jiraProjects.some((project) => project.key === teamSelectedProject)) {
+      setTeamSelectedProject(defaultProjectKey);
+    }
+  }, [defaultProjectKey, projectOptionsKey, teamSelectedProject]);
 
   const saveConfig = () => {
     localStorage.setItem("dashboard_ot", String(otHours));
@@ -383,7 +392,7 @@ export default function Dashboard() {
 
   const autoCloseOtherEmployeesTasks = () => {
     if (!teamSelectedProject) {
-      setTeamSelectedProject(localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
+      setTeamSelectedProject(defaultProjectKey);
     }
     setTeamAssigneeFilter("all");
     setTeamSearchQuery("");
@@ -622,7 +631,7 @@ export default function Dashboard() {
         console.warn("Lỗi lấy thông tin user", e);
       }
 
-      const projectKeys = JIRA_PROJECTS.map((p) => p.key);
+      const projectKeys = jiraProjects.map((p) => p.key);
       const result = await getMyIssues({ projectKeys, maxResults: 2000 });
       const issuesWithFullWorklogs = [...result.issues];
       const issuesNeedingFullWorklogs = issuesWithFullWorklogs.filter((issue) => {
@@ -669,7 +678,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [isConfigured]);
+  }, [isConfigured, projectOptionsKey]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -806,7 +815,7 @@ export default function Dashboard() {
   const pieData = Object.entries(statusCounts).map(([name, value]) => ({ name, value }));
 
   // ── Per-project bar chart ──
-  const projectStats: ProjectStat[] = JIRA_PROJECTS.map((p) => {
+  const projectStats: ProjectStat[] = jiraProjects.map((p) => {
     const projIssues = filteredIssues.filter((i) => i.fields.project.key === p.key);
 
     const loggedSeconds = projIssues.reduce((sum, issue) => {
@@ -1273,7 +1282,7 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
                       }}
                       style={{ padding: "6px 12px", borderRadius: 6, background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)", cursor: "pointer", outline: "none", fontSize: 14 }}
                     >
-                      {JIRA_PROJECTS.map(p => (
+                      {jiraProjects.map(p => (
                         <option key={p.key} value={p.key}>{p.name} ({p.key})</option>
                       ))}
                     </select>

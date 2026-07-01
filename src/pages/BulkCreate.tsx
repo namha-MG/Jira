@@ -2,7 +2,7 @@ import React, { useState, useEffect, useSyncExternalStore } from "react";
 import * as XLSX from "xlsx";
 import { createIssue, createSubTask, JiraIssue, JiraUser, getLatestTaskDate, getAssignableUsers, getAllIssuesByJql, getBoards, getSprints, moveIssuesToSprint, JiraSprint } from "../jiraService";
 import UserSelect from "../components/UserSelect";
-import { JIRA_PROJECTS } from "../config";
+import { getDefaultProjectKey, getSelectedJiraProjects } from "../config";
 import { copyToClipboard } from "../utils";
 import { bulkCreateStore, CreationLog } from "../stores/bulkCreateStore";
 import { addAutoResolveIssueKeys } from "../stores/autoResolveStore";
@@ -42,7 +42,9 @@ const parseExcelDate = (val: any): Date | null => {
 };
 
 export default function BulkCreate() {
-  const [selectedProject, setSelectedProject] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
+  const jiraProjects = getSelectedJiraProjects();
+  const projectOptionsKey = jiraProjects.map((project) => project.key).join("|");
+  const [selectedProject, setSelectedProject] = useState(() => getDefaultProjectKey());
   const [bulkText, setBulkText] = useState("");
   const [assignee, setAssignee] = useState("");
   const [estimate] = useState("7h"); // Cố định 7h theo yêu cầu thủ công
@@ -106,6 +108,12 @@ export default function BulkCreate() {
   const [excelData, setExcelData] = useState<any[]>([]);
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
+
+  useEffect(() => {
+    if (!jiraProjects.some((project) => project.key === selectedProject)) {
+      setSelectedProject(jiraProjects[0]?.key || "");
+    }
+  }, [projectOptionsKey, selectedProject]);
 
   useEffect(() => {
     if (isConfigured && selectedProject) {
@@ -672,7 +680,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                     onChange={(e) => setSelectedProject(e.target.value)}
                     disabled={isAnalyzing}
                   >
-                    {JIRA_PROJECTS.map((p) => (
+                    {jiraProjects.map((p) => (
                       <option key={p.key} value={p.key}>
                         {p.name} ({p.key})
                       </option>
@@ -865,7 +873,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                     onChange={(e) => setSelectedProject(e.target.value)}
                     disabled={isRunning}
                   >
-                    {JIRA_PROJECTS.map((p) => (
+                    {jiraProjects.map((p) => (
                       <option key={p.key} value={p.key}>
                         {p.name} ({p.key})
                       </option>
@@ -982,7 +990,7 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                       onChange={(e) => setSelectedProject(e.target.value)}
                       disabled={isRunning}
                     >
-                      {JIRA_PROJECTS.map((p) => (
+                      {jiraProjects.map((p) => (
                         <option key={p.key} value={p.key}>
                           {p.name} ({p.key})
                         </option>

@@ -20,7 +20,7 @@ import {
   getWorklogs,
   getCurrentUser
 } from "../jiraService";
-import { JIRA_PROJECTS } from "../config";
+import { getDefaultProjectKey, getSelectedJiraProjects } from "../config";
 import { copyToClipboard } from "../utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -78,6 +78,9 @@ function getBadgeClass(status: string): string {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function Teams() {
+  const jiraProjects = getSelectedJiraProjects();
+  const projectOptionsKey = jiraProjects.map((project) => project.key).join("|");
+  const defaultProjectKey = getDefaultProjectKey();
   const [activeTab, setActiveTab] = useState<Tab>("teams");
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
 
@@ -114,7 +117,7 @@ export default function Teams() {
   // ── Tab 4: Team tasks ─────────────────────────────────────────────────────
   const [taskTeamId, setTaskTeamId] = useState<number | null>(null);
   const [taskMembers, setTaskMembers] = useState<TeamMember[]>([]);
-  const [taskProjects, setTaskProjects] = useState<string[]>([localStorage.getItem("default_project") || JIRA_PROJECTS[0].key]);
+  const [taskProjects, setTaskProjects] = useState<string[]>([defaultProjectKey]);
   const [taskStatusFilter, setTaskStatusFilter] = useState("all");
   const [taskMemberFilter, setTaskMemberFilter] = useState("all");
   const [taskDateFrom, setTaskDateFrom] = useState(() => {
@@ -147,7 +150,7 @@ export default function Teams() {
   const [changeAssigneeLogs, setChangeAssigneeLogs] = useState<{ issueKey: string; status: "pending" | "success" | "error"; error?: string }[]>([]);
 
   // ── Tab 6: Sprints ────────────────────────────────────────────────────────
-  const [sprintProjectKey, setSprintProjectKey] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
+  const [sprintProjectKey, setSprintProjectKey] = useState(() => defaultProjectKey);
   const [sprintBoards, setSprintBoards] = useState<any[]>([]);
   const [sprintBoardId, setSprintBoardId] = useState<number | "">("");
   const [sprintsList, setSprintsList] = useState<JiraSprint[]>([]);
@@ -190,7 +193,7 @@ export default function Teams() {
   // ── Tab 5: Statistics ─────────────────────────────────────────────────────
   const [statTeamId, setStatTeamId] = useState<number | null>(null);
   const [statMembers, setStatMembers] = useState<TeamMember[]>([]);
-  const [statProjects, setStatProjects] = useState<string[]>([localStorage.getItem("default_project") || JIRA_PROJECTS[0].key]);
+  const [statProjects, setStatProjects] = useState<string[]>([defaultProjectKey]);
   const [statStatusFilter, setStatStatusFilter] = useState("all");
   const [statMemberFilter, setStatMemberFilter] = useState("all");
   const [statDateFrom, setStatDateFrom] = useState(() => {
@@ -203,6 +206,21 @@ export default function Teams() {
   const [statTasks, setStatTasks] = useState<JiraIssue[]>([]);
   const [statLoading, setStatLoading] = useState(false);
   const [statError, setStatError] = useState("");
+
+  useEffect(() => {
+    const validProjectKeys = new Set(jiraProjects.map((project) => project.key));
+    const normalizeProjects = (current: string[]) => {
+      const next = current.filter((key) => validProjectKeys.has(key));
+      const normalized = next.length > 0 ? next : [defaultProjectKey];
+      return normalized.join("|") === current.join("|") ? current : normalized;
+    };
+
+    setTaskProjects(normalizeProjects);
+    setStatProjects(normalizeProjects);
+    if (!validProjectKeys.has(sprintProjectKey)) {
+      setSprintProjectKey(defaultProjectKey);
+    }
+  }, [defaultProjectKey, projectOptionsKey, sprintProjectKey]);
 
   // ─── Data fetching ─────────────────────────────────────────────────────────
 
@@ -980,7 +998,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                     disabled={teamSaving}
                   >
                     <option value="">-- Không gán --</option>
-                    {JIRA_PROJECTS.map(p => (
+                    {jiraProjects.map(p => (
                       <option key={p.key} value={p.key}>{p.name} ({p.key})</option>
                     ))}
                   </select>
@@ -1427,7 +1445,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                 <div className="form-group" style={{ margin: 0, gridColumn: "1 / -1" }}>
                   <label>Dự án (có thể chọn nhiều)</label>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-                    {JIRA_PROJECTS.map(p => {
+                    {jiraProjects.map(p => {
                       const isActive = taskProjects.includes(p.key);
                       return (
                         <button
@@ -1520,7 +1538,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                         setAssignSprintLoading(true);
                         setAssignSprintModalOpen(true);
                         try {
-                          const boards = await getBoards(taskProjects[0] || JIRA_PROJECTS[0].key);
+                          const boards = await getBoards(taskProjects[0] || defaultProjectKey);
                           let allSprints: JiraSprint[] = [];
                           for (const b of boards) {
                             try {
@@ -1697,7 +1715,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                 <div className="form-group" style={{ margin: 0, gridColumn: "1 / -1" }}>
                   <label>Dự án (có thể chọn nhiều)</label>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-                    {JIRA_PROJECTS.map(p => {
+                    {jiraProjects.map(p => {
                       const isActive = statProjects.includes(p.key);
                       return (
                         <button
@@ -1819,7 +1837,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                   value={sprintProjectKey}
                   onChange={(e) => setSprintProjectKey(e.target.value)}
                 >
-                  {JIRA_PROJECTS.map(p => <option key={p.key} value={p.key}>{p.name} ({p.key})</option>)}
+                  {jiraProjects.map(p => <option key={p.key} value={p.key}>{p.name} ({p.key})</option>)}
                 </select>
               </div>
 

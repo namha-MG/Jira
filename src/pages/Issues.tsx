@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import {
   getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, updateIssueEstimate, updateIssue, getCurrentUser
 } from "../jiraService";
-import { JIRA_PROJECTS } from "../config";
+import { getDefaultProjectKey, getSelectedJiraProjects } from "../config";
 import NotificationBell from "../components/NotificationBell";
 import UserSelect from "../components/UserSelect";
 import { jobStore } from "../stores/jobStore";
@@ -55,7 +55,9 @@ function getProgressClass(pct: number): string {
 }
 
 export default function Issues() {
-  const [selectedProject, setSelectedProject] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
+  const jiraProjects = getSelectedJiraProjects();
+  const projectOptionsKey = jiraProjects.map((project) => project.key).join("|");
+  const [selectedProject, setSelectedProject] = useState(() => getDefaultProjectKey());
   const [issues, setIssues] = useState<JiraIssue[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -114,6 +116,12 @@ export default function Issues() {
   const [currentUser, setCurrentUser] = useState<JiraUser | null>(null);
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
+
+  useEffect(() => {
+    if (!jiraProjects.some((project) => project.key === selectedProject)) {
+      setSelectedProject(jiraProjects[0]?.key || "");
+    }
+  }, [projectOptionsKey, selectedProject]);
 
   useEffect(() => {
     setStatusFilter("all");
@@ -521,7 +529,7 @@ export default function Issues() {
         <div className="filter-bar issues-filter-bar" style={{ flexWrap: "wrap", gap: 12 }}>
           {/* Project tabs */}
           <div className="project-tab-list" style={{ display: "flex", gap: 4 }}>
-            {JIRA_PROJECTS.map((p) => (
+            {jiraProjects.map((p) => (
               <button
                 key={p.key}
                 id={`tab-project-${p.key}`}

@@ -808,6 +808,54 @@ textarea { resize: vertical; min-height: 80px; }
   margin-bottom: 20px;
 }
 
+.settings-project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.settings-project-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.settings-project-option:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-hover);
+}
+
+.settings-project-option span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.2;
+}
+
+.settings-project-option strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.settings-project-option small {
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 /* Task form pages */
 .field-stack {
   display: flex;

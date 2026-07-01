@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
 import { addWorklog, parseTimeToSeconds, getMyIssues, JiraIssue, getTransitions, transitionIssue, getIssue, getJiraFields, generateAiOutput } from "../jiraService";
-import { JIRA_PROJECTS } from "../config";
+import { getSelectedJiraProjects } from "../config";
 import NotificationBell from "../components/NotificationBell";
 
 interface Toast { id: number; type: "success" | "error"; msg: string; }
 
 export default function LogWork() {
+  const jiraProjects = getSelectedJiraProjects();
+  const projectOptionsKey = jiraProjects.map((project) => project.key).join("|");
   const [issueKeysText, setIssueKeysText] = useState("");
   const [timeSpent, setTimeSpent] = useState("7h");
   const [logDate, setLogDate] = useState(() => {
@@ -32,7 +34,7 @@ export default function LogWork() {
     if (!isConfigured) return;
     setLoadingIssues(true);
     getMyIssues({
-      projectKeys: JIRA_PROJECTS.map((p) => p.key),
+      projectKeys: jiraProjects.map((p) => p.key),
       maxResults: 100,
       assignee: assigneeFilter,
     })
@@ -43,7 +45,7 @@ export default function LogWork() {
 
   useEffect(() => {
     fetchSuggestedIssues();
-  }, [isConfigured]);
+  }, [isConfigured, projectOptionsKey]);
 
   const addToast = (type: "success" | "error", msg: string) => {
     const id = Date.now();
@@ -494,7 +496,7 @@ export default function LogWork() {
                     </div>
                   </div>
                   <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                    Projects: {JIRA_PROJECTS.map((p) => p.key).join(", ")}
+                    Projects: {jiraProjects.map((p) => p.key).join(", ")}
                   </div>
                 </div>
 
@@ -627,7 +629,7 @@ export default function LogWork() {
               <div className="settings-section">
                 <div className="settings-section-title">🚀 Project Keys</div>
                 <div className="project-key-list">
-                  {JIRA_PROJECTS.map((p) => (
+                  {jiraProjects.map((p) => (
                     <div key={p.key} className="project-key-row">
                       <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>{p.name}</span>
                       <button

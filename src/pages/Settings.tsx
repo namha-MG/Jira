@@ -1,6 +1,13 @@
 import { useState, useEffect } from "react";
 import { testConnection, JiraUser } from "../jiraService";
-import { JIRA_BASE_URL, msalConfig, JIRA_PROJECTS } from "../config";
+import {
+  getDefaultProjectKey,
+  getSelectedProjectKeys,
+  JIRA_BASE_URL,
+  JIRA_PROJECTS,
+  msalConfig,
+  saveSelectedProjectKeys,
+} from "../config";
 import { getHolidays, saveHolidays, DEFAULT_HOLIDAYS } from "../utils";
 
 interface Toast { id: number; type: "success" | "error" | "info"; msg: string; }
@@ -10,7 +17,9 @@ export default function Settings() {
   const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
   const [authorizedCloseTeam, setAuthorizedCloseTeam] = useState(() => localStorage.getItem("authorized_close_team") || "");
   const [jiraUrl, setJiraUrl] = useState(() => localStorage.getItem("jira_url") || JIRA_BASE_URL);
-  const [defaultProject, setDefaultProject] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
+  const [selectedProjectKeys, setSelectedProjectKeys] = useState<string[]>(() => getSelectedProjectKeys());
+  const [projectSearch, setProjectSearch] = useState("");
+  const [defaultProject, setDefaultProject] = useState(() => getDefaultProjectKey());
   const [autoLogEnabled, setAutoLogEnabled] = useState(() => localStorage.getItem("auto_log_enabled") !== "false");
   const [holidays, setHolidays] = useState<string[]>([]);
   const [newHoliday, setNewHoliday] = useState("");
@@ -25,6 +34,15 @@ export default function Settings() {
   const tenantId = msalConfig.auth.authority.split("/").pop() || "";
   const clientId = msalConfig.auth.clientId;
   const isNotConfigured = clientId === "YOUR_CLIENT_ID" || tenantId.includes("YOUR_TENANT_ID");
+  const projectByKey = new Map(JIRA_PROJECTS.map((project) => [project.key, project]));
+  const selectedProjects = selectedProjectKeys
+    .map((key) => projectByKey.get(key))
+    .filter((project): project is (typeof JIRA_PROJECTS)[number] => !!project);
+  const filteredProjects = JIRA_PROJECTS.filter((project) => {
+    const search = projectSearch.trim().toLowerCase();
+    if (!search) return true;
+    return project.key.toLowerCase().includes(search) || project.name.toLowerCase().includes(search);
+  });
 
   const addToast = (type: Toast["type"], msg: string) => {
     const id = Date.now();
@@ -54,6 +72,13 @@ export default function Settings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (selectedProjectKeys.length === 0) return;
+    if (!selectedProjectKeys.includes(defaultProject)) {
+      setDefaultProject(selectedProjectKeys[0]);
+    }
+  }, [defaultProject, selectedProjectKeys]);
+
   const testConn = async () => {
     setTesting(true);
     setConnStatus(null);
@@ -69,6 +94,16 @@ export default function Settings() {
 
   const handleSave = async () => {
     setSaving(true);
+    if (selectedProjectKeys.length === 0) {
+      addToast("error", "Vui lòng chọn ít nhất 1 dự án tham gia");
+      setSaving(false);
+      return;
+    }
+
+    const nextDefaultProject = selectedProjectKeys.includes(defaultProject)
+      ? defaultProject
+      : selectedProjectKeys[0];
+
     if (pat.trim()) {
       localStorage.setItem("jira_pat", pat.trim());
     } else {
@@ -80,10 +115,12 @@ export default function Settings() {
       localStorage.removeItem("gemini_api_key");
     }
     localStorage.setItem("jira_url", jiraUrl.trim() || JIRA_BASE_URL);
-    localStorage.setItem("default_project", defaultProject);
+    saveSelectedProjectKeys(selectedProjectKeys);
+    localStorage.setItem("default_project", nextDefaultProject);
     localStorage.setItem("auto_log_enabled", String(autoLogEnabled));
     localStorage.setItem("authorized_close_team", authorizedCloseTeam);
     saveHolidays(holidays);
+    setDefaultProject(nextDefaultProject);
 
     // Test connection
     await testConn();
@@ -114,6 +151,15 @@ export default function Settings() {
 
     addToast("success", "✅ Đã lưu cài đặt");
     setSaving(false);
+  };
+
+  const toggleProjectKey = (projectKey: string) => {
+    setSelectedProjectKeys((current) => {
+      if (current.includes(projectKey)) {
+        return current.filter((key) => key !== projectKey);
+      }
+      return [...current, projectKey];
+    });
   };
 
   const handleClear = () => {
@@ -193,12 +239,57 @@ export default function Settings() {
                   value={defaultProject}
                   onChange={(e) => setDefaultProject(e.target.value)}
                 >
-                  {JIRA_PROJECTS.map((p) => (
+                  {selectedProjects.map((p) => (
                     <option key={p.key} value={p.key}>
                       {p.name} ({p.key})
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="form-group">
+                <label>Dự án tham gia</label>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <input
+                    type="text"
+                    value={projectSearch}
+                    onChange={(e) => setProjectSearch(e.target.value)}
+                    placeholder="Tìm theo mã hoặc tên dự án..."
+                    style={{ flex: "1 1 220px" }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setSelectedProjectKeys(JIRA_PROJECTS.map((project) => project.key))}
+                  >
+                    Chọn tất cả
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setSelectedProjectKeys([])}
+                  >
+                    Bỏ chọn
+                  </button>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                  Đã chọn <strong style={{ color: "var(--text-primary)" }}>{selectedProjectKeys.length}</strong>/{JIRA_PROJECTS.length} dự án. Các màn Dashboard, Issues, Log Work, Tạo Issue Nhanh sẽ chỉ dùng các dự án này.
+                </div>
+                <div className="settings-project-grid">
+                  {filteredProjects.map((project) => (
+                    <label key={project.key} className="settings-project-option">
+                      <input
+                        type="checkbox"
+                        checked={selectedProjectKeys.includes(project.key)}
+                        onChange={() => toggleProjectKey(project.key)}
+                      />
+                      <span>
+                        <strong>{project.key}</strong>
+                        {project.name !== project.key && <small>{project.name}</small>}
+                      </span>
+                    </label>
+                  ))}
+                </div>
               </div>
 
               <div className="form-group">

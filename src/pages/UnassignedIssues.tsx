@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { getAllIssuesByJql, JiraIssue, getAssignableUsers, updateIssue, getWorklogs, deleteWorklog, formatSeconds } from "../jiraService";
-import { JIRA_PROJECTS } from "../config";
+import { getDefaultProjectKey, getSelectedJiraProjects } from "../config";
 import NotificationBell from "../components/NotificationBell";
 import UserSelect from "../components/UserSelect";
 
@@ -12,7 +12,9 @@ function getBadgeClass(statusName: string = "") {
 }
 
 export default function UnassignedIssues() {
-  const [selectedProject, setSelectedProject] = useState(() => localStorage.getItem("default_project") || JIRA_PROJECTS[0].key);
+  const jiraProjects = getSelectedJiraProjects();
+  const projectOptionsKey = jiraProjects.map((project) => project.key).join("|");
+  const [selectedProject, setSelectedProject] = useState(() => getDefaultProjectKey());
   const [issues, setIssues] = useState<JiraIssue[]>([]);
   const [loading, setLoading] = useState(true);
   const [dateFrom, setDateFrom] = useState(() => {
@@ -37,6 +39,12 @@ export default function UnassignedIssues() {
   // Batch action state
   const [selectedIssues, setSelectedIssues] = useState<string[]>([]);
   const [deletingLogs, setDeletingLogs] = useState(false);
+
+  useEffect(() => {
+    if (!jiraProjects.some((project) => project.key === selectedProject)) {
+      setSelectedProject(jiraProjects[0]?.key || "");
+    }
+  }, [projectOptionsKey, selectedProject]);
 
   const fetchUnassignedIssues = useCallback(async () => {
     try {
@@ -173,7 +181,7 @@ export default function UnassignedIssues() {
               style={{ width: 220, padding: "8px 12px", background: "var(--bg-card)" }}
               disabled={loading}
             >
-              {JIRA_PROJECTS.map(p => (
+              {jiraProjects.map(p => (
                 <option key={p.key} value={p.key}>{p.name} ({p.key})</option>
               ))}
             </select>
