@@ -8,7 +8,10 @@ import {
   parseTimeToSeconds,
   transitionIssue,
 } from "./jiraService";
-import { getAutoResolveIssueKeys, removeAutoResolveIssueKey } from "./stores/autoResolveStore";
+import {
+  getActiveAutoResolveScheduleItems,
+  markAutoResolveIssueStatus,
+} from "./stores/autoResolveStore";
 
 function escapeJqlKey(key: string): string {
   return key.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
@@ -92,58 +95,129 @@ function findResolveTransition(transitions: { id: string; name: string; to: { na
   });
 }
 
+function getIssueScheduleFields(issue: JiraIssue) {
+  return {
+    summary: issue.fields.summary,
+    projectKey: issue.fields.project?.key,
+    issueType: issue.fields.issuetype?.name,
+    assigneeName: issue.fields.assignee?.displayName,
+    startDate: issue.fields.customfield_10300,
+    endDate: issue.fields.customfield_10302 || issue.fields.duedate,
+  };
+}
+
 export async function silentAutoProcessTasks(onProgress?: (msg: string) => void) {
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
   if (!isConfigured) return;
 
-  const scheduledKeys = getAutoResolveIssueKeys();
-  if (scheduledKeys.length === 0) return;
+  const scheduledItems = getActiveAutoResolveScheduleItems();
+  if (scheduledItems.length === 0) return;
 
   try {
+    const scheduledKeys = scheduledItems.map(item => item.key);
     const quotedKeys = scheduledKeys.map(key => `"${escapeJqlKey(key)}"`).join(",");
     const issues = await getAllIssuesByJql(`key in (${quotedKeys})`, scheduledKeys.length);
     const now = toStartOfLocalDay(new Date());
 
     let resolvedCount = 0;
     let loggedCount = 0;
+    const foundKeys = new Set(issues.map(issue => issue.key));
+
+    for (const item of scheduledItems) {
+      if (!foundKeys.has(item.key)) {
+        markAutoResolveIssueStatus(item.key, "error", {
+          lastMessage: "Không tìm thấy issue trên Jira hoặc tài khoản không có quyền xem.",
+        });
+      }
+    }
 
     for (const issue of issues) {
-      if (isResolvedOrClosed(issue)) {
-        removeAutoResolveIssueKey(issue.key);
-        continue;
-      }
-
-      const endDateStr = issue.fields.customfield_10302 || issue.fields.duedate;
-      if (!endDateStr) continue;
-
-      const endDate = toStartOfLocalDay(new Date(endDateStr));
-      if (Number.isNaN(endDate.getTime()) || endDate > now) continue;
-
-      const estimateSeconds = parseEstimateSeconds(issue);
-      const loggedSeconds = getLoggedSeconds(issue);
-      const secondsToLog = Math.max(0, estimateSeconds - loggedSeconds);
-
-      if (secondsToLog > 0) {
-        await addWorklog(issue.key, {
-          timeSpentSeconds: secondsToLog,
-          comment: "Tự động log work theo estimate khi đến End Date",
-          started: formatJiraDateTime(new Date(endDateStr)),
-          adjustEstimate: "auto",
+      try {
+        markAutoResolveIssueStatus(issue.key, "processing", {
+          ...getIssueScheduleFields(issue),
+          lastMessage: "Đang kiểm tra lịch auto log và Resolve.",
         });
-        loggedCount++;
-      }
 
-      const transitions = await getTransitions(issue.key);
-      const resolveTransition = findResolveTransition(transitions);
-      if (!resolveTransition) {
-        console.warn(`No Resolve transition found for ${issue.key}`);
-        continue;
-      }
+        if (isResolvedOrClosed(issue)) {
+          markAutoResolveIssueStatus(issue.key, "completed", {
+            ...getIssueScheduleFields(issue),
+            completedAt: Date.now(),
+            lastMessage: "Issue đã ở trạng thái đóng/resolve trước khi job chạy.",
+          });
+          continue;
+        }
 
-      const resolveFields = await buildResolveFields(issue.fields.summary);
-      await transitionIssue(issue.key, resolveTransition.id, resolveFields);
-      removeAutoResolveIssueKey(issue.key);
-      resolvedCount++;
+        const endDateStr = issue.fields.customfield_10302 || issue.fields.duedate;
+        if (!endDateStr) {
+          markAutoResolveIssueStatus(issue.key, "error", {
+            ...getIssueScheduleFields(issue),
+            lastMessage: "Không có End Date nên chưa thể auto log và Resolve.",
+          });
+          continue;
+        }
+
+        const endDate = toStartOfLocalDay(new Date(endDateStr));
+        if (Number.isNaN(endDate.getTime())) {
+          markAutoResolveIssueStatus(issue.key, "error", {
+            ...getIssueScheduleFields(issue),
+            endDate: endDateStr,
+            lastMessage: "End Date không hợp lệ.",
+          });
+          continue;
+        }
+
+        if (endDate > now) {
+          markAutoResolveIssueStatus(issue.key, "pending", {
+            ...getIssueScheduleFields(issue),
+            lastMessage: "Đang chờ tới End Date.",
+          });
+          continue;
+        }
+
+        const estimateSeconds = parseEstimateSeconds(issue);
+        const loggedSeconds = getLoggedSeconds(issue);
+        const secondsToLog = Math.max(0, estimateSeconds - loggedSeconds);
+
+        if (secondsToLog > 0) {
+          await addWorklog(issue.key, {
+            timeSpentSeconds: secondsToLog,
+            comment: "Tự động log work theo estimate khi đến End Date",
+            started: formatJiraDateTime(new Date(endDateStr)),
+            adjustEstimate: "auto",
+          });
+          loggedCount++;
+        }
+
+        const transitions = await getTransitions(issue.key);
+        const resolveTransition = findResolveTransition(transitions);
+        if (!resolveTransition) {
+          markAutoResolveIssueStatus(issue.key, "error", {
+            ...getIssueScheduleFields(issue),
+            loggedSeconds: secondsToLog,
+            lastMessage: "Không tìm thấy transition Resolve cho issue.",
+          });
+          console.warn(`No Resolve transition found for ${issue.key}`);
+          continue;
+        }
+
+        const resolveFields = await buildResolveFields(issue.fields.summary);
+        await transitionIssue(issue.key, resolveTransition.id, resolveFields);
+        markAutoResolveIssueStatus(issue.key, "completed", {
+          ...getIssueScheduleFields(issue),
+          loggedSeconds: secondsToLog,
+          completedAt: Date.now(),
+          lastMessage: secondsToLog > 0
+            ? "Đã auto log phần còn thiếu theo estimate và chuyển Resolve."
+            : "Đã chuyển Resolve, không cần log thêm vì task đã đủ giờ.",
+        });
+        resolvedCount++;
+      } catch (err: any) {
+        markAutoResolveIssueStatus(issue.key, "error", {
+          ...getIssueScheduleFields(issue),
+          lastMessage: err?.response?.data?.errorMessages?.[0] || err?.message || "Auto resolve thất bại.",
+        });
+        console.error(`Auto resolve failed for ${issue.key}`, err);
+      }
     }
 
     if ((resolvedCount > 0 || loggedCount > 0) && onProgress) {

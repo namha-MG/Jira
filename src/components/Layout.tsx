@@ -14,6 +14,7 @@ const navItems: { id: Page; icon: string; label: string; path: string }[] = [
   { id: "issues",     icon: "📋", label: "Danh sách Issues", path: "/issues" },
   { id: "logwork",    icon: "⏱️", label: "Log Công Việc", path: "/logwork" },
   { id: "bulkcreate", icon: "➕", label: "Tạo Issue Nhanh", path: "/bulkcreate" },
+  { id: "autoschedules", icon: "⏳", label: "Lịch Auto Task", path: "/autoschedules" },
   { id: "unassigned", icon: "👤", label: "Task Chưa Gán", path: "/unassigned" },
   { id: "teams",      icon: "🏢", label: "Quản lý Team", path: "/teams" },
   { id: "joblogs",    icon: "🤖", label: "Lịch sử Job Tự động", path: "/joblogs" },

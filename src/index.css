@@ -1247,6 +1247,78 @@ textarea { resize: vertical; min-height: 80px; }
   max-width: 220px;
 }
 
+.auto-schedule-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.auto-schedule-stats {
+  margin-bottom: 0;
+}
+
+.auto-schedule-alert {
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+}
+
+.auto-schedule-alert.success {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.24);
+  color: var(--accent-green);
+}
+
+.auto-schedule-alert.error {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.24);
+  color: var(--accent-red);
+}
+
+.auto-schedule-filter {
+  margin-bottom: 0;
+}
+
+.auto-schedule-table-wrap table {
+  min-width: 1120px;
+}
+
+.auto-schedule-key {
+  color: var(--accent-blue-light);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.auto-schedule-key:hover {
+  text-decoration: underline;
+}
+
+.auto-schedule-summary {
+  max-width: 260px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.auto-schedule-message {
+  max-width: 320px;
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.auto-schedule-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
 .mobile-nav {
   display: none;
 }
@@ -1576,6 +1648,79 @@ textarea { resize: vertical; min-height: 80px; }
 
   .table-wrap table {
     min-width: 720px;
+  }
+
+  .auto-schedule-table-wrap {
+    border: 0;
+    overflow: visible;
+  }
+
+  .auto-schedule-table-wrap table {
+    min-width: 0;
+  }
+
+  .auto-schedule-table thead {
+    display: none;
+  }
+
+  .auto-schedule-table,
+  .auto-schedule-table tbody,
+  .auto-schedule-table tr,
+  .auto-schedule-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .auto-schedule-table tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  .auto-schedule-table tr {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  .auto-schedule-table td {
+    display: grid;
+    grid-template-columns: 104px minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    overflow-wrap: anywhere;
+  }
+
+  .auto-schedule-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .auto-schedule-table td::before {
+    content: attr(data-label);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  .auto-schedule-summary,
+  .auto-schedule-message {
+    max-width: none;
+  }
+
+  .auto-schedule-summary {
+    white-space: normal;
+  }
+
+  .auto-schedule-actions {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .auto-schedule-actions .btn {
+    flex: 1 1 120px;
   }
 
   thead th,

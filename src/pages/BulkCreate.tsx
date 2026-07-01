@@ -5,7 +5,7 @@ import UserSelect from "../components/UserSelect";
 import { getDefaultProjectKey, getSelectedJiraProjects } from "../config";
 import { copyToClipboard } from "../utils";
 import { bulkCreateStore, CreationLog } from "../stores/bulkCreateStore";
-import { addAutoResolveIssueKeys } from "../stores/autoResolveStore";
+import { addAutoResolveIssueKeys, AutoResolveScheduleInput } from "../stores/autoResolveStore";
 import { silentAutoProcessTasks } from "../autoProcessor";
 
 export interface ManualTaskRow {
@@ -188,6 +188,17 @@ export default function BulkCreate() {
     return `${year}-${month}-${day}T${hh}:${mm}:00.000${sign}${offsetHours}${offsetMins}`;
   };
 
+  const scheduleAutoResolveIssue = (item: Omit<Extract<AutoResolveScheduleInput, object>, "projectKey" | "autoLogWork" | "status" | "lastMessage" | "source">) => {
+    addAutoResolveIssueKeys([{
+      ...item,
+      projectKey: selectedProject,
+      autoLogWork: true,
+      status: "pending",
+      lastMessage: "Đang chờ tới End Date.",
+      source: "bulk-create",
+    }]);
+  };
+
   const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -269,7 +280,15 @@ export default function BulkCreate() {
         });
 
         if (autoLogWork && formattedEndD) {
-          addAutoResolveIssueKeys([created.key]);
+          scheduleAutoResolveIssue({
+            key: created.key,
+            summary,
+            issueType,
+            assigneeName: row["Assignee"] !== undefined ? String(row["Assignee"] || "") : "",
+            estimate: origEstimate,
+            startDate: formattedStartD,
+            endDate: formattedEndD,
+          });
         }
 
         setLogs(prev => prev.map((l, idx) => idx === logIndex ? { ...l, status: "success", key: created.key } : l));
@@ -373,7 +392,15 @@ export default function BulkCreate() {
                 });
 
                 if (autoLogWork && subEndDateForAutoResolve) {
-                  addAutoResolveIssueKeys([sCreated.key]);
+                  scheduleAutoResolveIssue({
+                    key: sCreated.key,
+                    summary: sub.title,
+                    issueType: "Sub-task",
+                    assigneeName: row["Assignee"] !== undefined ? String(row["Assignee"] || "") : "",
+                    estimate: sub.est,
+                    startDate: formattedStartD,
+                    endDate: subEndDateForAutoResolve,
+                  });
                 }
 
                 setLogs(prev => prev.map((l, idx) => idx === targetIndex ? { ...l, status: "success", key: sCreated.key } : l));
@@ -519,7 +546,15 @@ export default function BulkCreate() {
         }
 
         if (taskAutoLogWork && taskEndDateStr) {
-          addAutoResolveIssueKeys([createdKey]);
+          scheduleAutoResolveIssue({
+            key: createdKey,
+            summary: summaries[i].summary,
+            issueType: manualMode === "subtask" ? "Sub-task" : "Task",
+            assigneeName: summaries[i].assignee || "",
+            estimate: taskEstimate,
+            startDate: taskStartDateStr,
+            endDate: taskEndDateStr,
+          });
         }
 
         setLogs((prev) =>

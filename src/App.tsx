@@ -8,6 +8,7 @@ import Issues from "./pages/Issues";
 import LogWork from "./pages/LogWork";
 import Settings from "./pages/Settings";
 import BulkCreate from "./pages/BulkCreate";
+import AutoSchedules from "./pages/AutoSchedules";
 import JobLogs from "./pages/JobLogs";
 import Teams from "./pages/Teams";
 import UnassignedIssues from "./pages/UnassignedIssues";
@@ -60,6 +61,7 @@ export default function App() {
           <Route path="/issues" element={<Issues />} />
           <Route path="/logwork" element={<LogWork />} />
           <Route path="/bulkcreate" element={<BulkCreate />} />
+          <Route path="/autoschedules" element={<AutoSchedules />} />
           <Route path="/teams" element={<Teams />} />
           <Route path="/joblogs" element={<JobLogs />} />
           <Route path="/unassigned" element={<UnassignedIssues />} />

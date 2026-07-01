@@ -1,1 +1,1 @@
-export type Page = "dashboard" | "issues" | "logwork" | "bulkcreate" | "settings" | "joblogs" | "teams" | "unassigned";
+export type Page = "dashboard" | "issues" | "logwork" | "bulkcreate" | "autoschedules" | "settings" | "joblogs" | "teams" | "unassigned";
