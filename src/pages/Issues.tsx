@@ -150,16 +150,26 @@ export default function Issues() {
     setLoading(true);
     setError(null);
     try {
-      let jql = `project = "${selectedProject}"`;
+      let baseJql = `project = "${selectedProject}"`;
       if (loadScope === "me") {
-        jql += ` AND assignee = currentUser()`;
+        baseJql += ` AND assignee = currentUser()`;
       }
+      const monthClause = ` AND (updated >= startOfMonth() OR worklogDate >= startOfMonth() OR (cf[10300] >= startOfMonth() AND cf[10300] <= endOfMonth()))`;
+      const orderBy = ` ORDER BY updated DESC`;
+      let jql = baseJql;
       if (timeRange === "month") {
-        jql += ` AND (updated >= startOfMonth() OR worklogDate >= startOfMonth())`;
+        jql += monthClause;
       }
-      jql += ` ORDER BY updated DESC`;
+      jql += orderBy;
 
-      let result = await getAllIssuesByJql(jql);
+      let result: JiraIssue[];
+      try {
+        result = await getAllIssuesByJql(jql);
+      } catch (err) {
+        if (timeRange !== "month") throw err;
+        console.warn("Month JQL with Start Date failed, retrying broad project query", err);
+        result = await getAllIssuesByJql(`${baseJql}${orderBy}`);
+      }
 
       if (loadScope === "me") {
         const parentKeys = new Set<string>();
@@ -394,8 +404,8 @@ export default function Issues() {
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-  const loggedRange = timeRange === "month" ? { start: startOfMonth, end: endOfToday } : undefined;
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  const loggedRange = timeRange === "month" ? { start: startOfMonth, end: endOfMonth } : undefined;
   const shouldUseCurrentUserWorklogs =
     loadScope === "me" ||
     userMatchesFilter(currentUser, assigneeFilter);
@@ -419,10 +429,12 @@ export default function Issues() {
       let matchTime = true;
       if (timeRange === "month") {
         const updatedDate = new Date(i.fields.updated);
+        const startDate = i.fields.customfield_10300 ? new Date(i.fields.customfield_10300) : null;
+        const hasStartDateThisMonth = !!startDate && isDateInRange(startDate, loggedRange);
         const hasWorklogThisMonth = i.fields.worklog?.worklogs?.some(
           (wl) => isWorklogByUser(wl, worklogUserForView) && isDateInRange(new Date(wl.started), loggedRange)
         );
-        matchTime = isDateInRange(updatedDate, loggedRange) || !!hasWorklogThisMonth;
+        matchTime = isDateInRange(updatedDate, loggedRange) || hasStartDateThisMonth || !!hasWorklogThisMonth;
       }
 
       const matchAssignee = assigneeFilter === "all" ||
