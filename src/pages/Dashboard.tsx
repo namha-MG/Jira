@@ -100,6 +100,10 @@ function getIssueClosedDate(issue: JiraIssue): Date | null {
   );
 }
 
+function getIssueStartDate(issue: JiraIssue): Date | null {
+  return parseJiraDate(issue.fields.customfield_10300);
+}
+
 function getIssueWorklogSeconds(
   issue: JiraIssue,
   currentUser: JiraUser | null,
@@ -713,6 +717,9 @@ export default function Dashboard() {
     const closedDate = getIssueClosedDate(i);
     if (selectedRange && closedDate && isDateInRange(closedDate, selectedRange)) return true;
 
+    const startDate = getIssueStartDate(i);
+    if (selectedRange && startDate && isDateInRange(startDate, selectedRange)) return true;
+
     // Giữ lại issue nếu nó được cập nhật trong khoảng thời gian này
     const updatedDate = new Date(i.fields.updated);
     if (selectedRange && isDateInRange(updatedDate, selectedRange)) return true;
@@ -826,9 +833,9 @@ export default function Dashboard() {
       projectKey: p.key,
       projectName: p.name,
       totalIssues: projIssues.length,
-      estimatedSeconds: projIssues.reduce((s, i) => s + (i.fields.timetracking?.originalEstimateSeconds || 0), 0),
+      estimatedSeconds: projIssues.reduce((s, i) => s + getIssueEstimatedSeconds(i), 0),
       loggedSeconds,
-      remainingSeconds: projIssues.reduce((s, i) => s + (i.fields.timetracking?.remainingEstimateSeconds || 0), 0),
+      remainingSeconds: projIssues.reduce((s, i) => s + Math.max(0, getIssueEstimatedSeconds(i) - getIssueLoggedSeconds(i)), 0),
     };
   });
 
@@ -1004,8 +1011,8 @@ Hãy phân tích và đưa ra một đoạn văn đề xuất tôi nên log bù 
   // ── Estimate vs Logged deviation ──
   const issuesWithDeviation = filteredIssues
     .map((issue) => {
-      const est = issue.fields.timetracking?.originalEstimateSeconds || 0;
-      const log = issue.fields.timetracking?.timeSpentSeconds || 0;
+      const est = getIssueEstimatedSeconds(issue);
+      const log = getIssueLoggedSeconds(issue);
       const rem = issue.fields.timetracking?.remainingEstimateSeconds || 0;
       if (est <= 0) return null;
       const diff = log - est;

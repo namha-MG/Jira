@@ -29,8 +29,16 @@ function getProgressClass(pct: number): string {
   return "good";
 }
 
+function getIssueEstimatedSeconds(issue: JiraIssue): number {
+  return issue.fields.aggregatetimeoriginalestimate ?? (issue.fields.timetracking?.originalEstimateSeconds || 0);
+}
+
+function getIssueLoggedSeconds(issue: JiraIssue): number {
+  return issue.fields.aggregatetimespent ?? (issue.fields.timetracking?.timeSpentSeconds || 0);
+}
+
 export default function TeamDashboardMetrics({ issues, member, useDateFilter, dateFrom, dateTo }: TeamDashboardMetricsProps) {
-  const totalEstimated = issues.reduce((s, i) => s + (i.fields.timetracking?.originalEstimateSeconds || 0), 0);
+  const totalEstimated = issues.reduce((s, i) => s + getIssueEstimatedSeconds(i), 0);
   
   const totalLogged = issues.reduce((sum, issue) => {
     const statusName = issue.fields.status?.name?.toLowerCase() || "";
@@ -56,11 +64,11 @@ export default function TeamDashboardMetrics({ issues, member, useDateFilter, da
       }, 0) || 0;
       return sum + periodLogs;
     } else {
-      return sum + (issue.fields.timetracking?.timeSpentSeconds || 0);
+      return sum + getIssueLoggedSeconds(issue);
     }
   }, 0);
 
-  const totalRemaining = issues.reduce((s, i) => s + (i.fields.timetracking?.remainingEstimateSeconds || 0), 0);
+  const totalRemaining = issues.reduce((s, i) => s + Math.max(0, getIssueEstimatedSeconds(i) - getIssueLoggedSeconds(i)), 0);
   const logPct = totalEstimated > 0 ? Math.round((totalLogged / totalEstimated) * 100) : 0;
 
   // ── Status & Type distribution ──
@@ -143,7 +151,7 @@ export default function TeamDashboardMetrics({ issues, member, useDateFilter, da
     if (!projectStatsMap[pName]) {
       projectStatsMap[pName] = { estimate: 0, logged: 0, remaining: 0 };
     }
-    projectStatsMap[pName].estimate += i.fields.timetracking?.originalEstimateSeconds || 0;
+    projectStatsMap[pName].estimate += getIssueEstimatedSeconds(i);
     
     let logged = 0;
     if (useDateFilter && dateFrom && dateTo) {
@@ -157,11 +165,11 @@ export default function TeamDashboardMetrics({ issues, member, useDateFilter, da
         return (wlDate >= rangeStart && wlDate <= rangeEnd) ? s + wl.timeSpentSeconds : s;
       }, 0) || 0;
     } else {
-      logged = i.fields.timetracking?.timeSpentSeconds || 0;
+      logged = getIssueLoggedSeconds(i);
     }
     projectStatsMap[pName].logged += logged;
     
-    projectStatsMap[pName].remaining += i.fields.timetracking?.remainingEstimateSeconds || 0;
+    projectStatsMap[pName].remaining += Math.max(0, getIssueEstimatedSeconds(i) - getIssueLoggedSeconds(i));
   });
   
   const projectChartData = Object.entries(projectStatsMap).map(([name, stats]) => ({
