@@ -62,7 +62,8 @@ export default function Issues() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
   const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const [assigneeFilter, setAssigneeFilter] = useState("all");
@@ -107,6 +108,12 @@ export default function Issues() {
   const [newEstimate, setNewEstimate] = useState("");
   const [updatingEstimate, setUpdatingEstimate] = useState(false);
 
+  // Edit Start/End Date states
+  const [dateModalOpen, setDateModalOpen] = useState<{ key: string; summary: string; startDate: string; endDate: string } | null>(null);
+  const [newStartDate, setNewStartDate] = useState("");
+  const [newEndDate, setNewEndDate] = useState("");
+  const [updatingDates, setUpdatingDates] = useState(false);
+
   // Status transition states
   const [statusTransitionModalOpen, setStatusTransitionModalOpen] = useState<JiraIssue | null>(null);
   const [availableTransitions, setAvailableTransitions] = useState<any[]>([]);
@@ -124,7 +131,7 @@ export default function Issues() {
   }, [projectOptionsKey, selectedProject]);
 
   useEffect(() => {
-    setStatusFilter("all");
+    setStatusFilter([]);
     setAssigneeFilter("all");
     
     // Fetch all assignable users for the selected project
@@ -278,6 +285,39 @@ export default function Issues() {
     return sortDir === "asc" ? " ↑" : " ↓";
   };
 
+  const getDateInputValue = (dateStr?: string) => {
+    if (!dateStr) return "";
+    const match = dateStr.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return "";
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const formatDateForDisplay = (dateStr?: string) => {
+    if (!dateStr) return "-";
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return "-";
+    return date.toLocaleDateString("vi-VN");
+  };
+
+  const formatJiraDateField = (dateStr: string, hour: number) => {
+    const [year, month, day] = dateStr.split("-").map(Number);
+    const date = new Date(year, month - 1, day, hour, 0, 0, 0);
+    const offset = -date.getTimezoneOffset();
+    const sign = offset >= 0 ? "+" : "-";
+    const offsetHours = String(Math.floor(Math.abs(offset) / 60)).padStart(2, "0");
+    const offsetMins = String(Math.abs(offset) % 60).padStart(2, "0");
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const dd = String(date.getDate()).padStart(2, "0");
+    const hh = String(date.getHours()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}T${hh}:00:00.000${sign}${offsetHours}${offsetMins}`;
+  };
+
   const isBugTask = useCallback((type?: string) => {
     if (!type) return false;
     const t = type.toLowerCase();
@@ -402,6 +442,37 @@ export default function Issues() {
     })();
   };
 
+  const handleDateSubmit = async () => {
+    if (!dateModalOpen) return;
+    const issueKey = dateModalOpen.key;
+    const startValue = newStartDate;
+    const endValue = newEndDate;
+
+    if (startValue && endValue && new Date(endValue).getTime() < new Date(startValue).getTime()) {
+      alert("End Date không được trước Start Date.");
+      return;
+    }
+
+    setUpdatingDates(true);
+    const jobId = jobStore.addJob({ type: "Cập nhật", title: `Sửa Start/End Date cho ${issueKey}` });
+
+    try {
+      await updateIssue(issueKey, {
+        fields: {
+          customfield_10300: startValue ? formatJiraDateField(startValue, 8) : null,
+          customfield_10302: endValue ? formatJiraDateField(endValue, 17) : null,
+        },
+      });
+      jobStore.updateJobStatus(jobId, "success");
+      setDateModalOpen(null);
+      jobStore.emit("REFRESH_ISSUES");
+    } catch (e: any) {
+      jobStore.updateJobStatus(jobId, "error", e.response?.data?.errorMessages?.[0] || e.message);
+    } finally {
+      setUpdatingDates(false);
+    }
+  };
+
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
@@ -424,7 +495,7 @@ export default function Issues() {
         normalizeText(i.fields.summary).includes(search) ||
         (i.fields.assignee && normalizeText(i.fields.assignee.displayName).includes(search));
         
-      const matchStatus = statusFilter === "all" || i.fields.status.name === statusFilter;
+      const matchStatus = statusFilter.length === 0 || statusFilter.includes(i.fields.status.name);
       
       let matchTime = true;
       if (timeRange === "month") {
@@ -622,15 +693,83 @@ export default function Issues() {
               onChange={(e) => setSearchText(e.target.value)}
               style={{ flex: 1, minWidth: 120 }}
             />
-            <select
-              id="select-status-filter"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              style={{ width: 140 }}
-            >
-              <option value="all">Tất cả status</option>
-              {uniqueStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+            <div className="filter-field filter-status-field" style={{ position: "relative", width: 170 }}>
+              <div
+                id="select-status-filter"
+                onClick={() => setStatusDropdownOpen(!statusDropdownOpen)}
+                style={{
+                  width: "100%", padding: "8px 12px", borderRadius: 6, background: "var(--bg-primary)",
+                  border: `1px solid ${statusFilter.length > 0 ? "var(--accent-blue)" : "var(--border)"}`,
+                  cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center",
+                  fontSize: 13, height: "100%", userSelect: "none",
+                  color: statusFilter.length > 0 ? "var(--accent-blue)" : "var(--text-primary)"
+                }}
+              >
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {statusFilter.length === 0 ? "Tất cả status" : `${statusFilter.length} status đã chọn`}
+                </span>
+                <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.7 }}>{statusDropdownOpen ? "▲" : "▼"}</span>
+              </div>
+              {statusDropdownOpen && (
+                <div style={{
+                  position: "absolute", top: "calc(100% + 4px)", left: 0, minWidth: "100%",
+                  background: "var(--bg-elevated, var(--bg-secondary))",
+                  border: "1px solid var(--border)", borderRadius: 8, zIndex: 110,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.4)", overflow: "hidden"
+                }}>
+                  <div style={{ display: "flex", gap: 6, padding: "8px 8px 4px", borderBottom: "1px solid var(--border)" }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ flex: 1, minHeight: 26, padding: "4px 8px" }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setStatusFilter(uniqueStatuses);
+                      }}
+                    >
+                      Chọn tất cả
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ flex: 1, minHeight: 26, padding: "4px 8px" }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setStatusFilter([]);
+                      }}
+                    >
+                      Bỏ chọn
+                    </button>
+                  </div>
+                  <div style={{ padding: "6px 4px", maxHeight: 240, overflowY: "auto" }}>
+                    {uniqueStatuses.map((s) => {
+                      const checked = statusFilter.includes(s);
+                      return (
+                        <label
+                          key={s}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8, padding: "8px 10px",
+                            cursor: "pointer", fontSize: 12, color: "var(--text-primary)",
+                            borderRadius: 4, background: checked ? "rgba(79, 142, 247, 0.12)" : "transparent",
+                            marginBottom: 2
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              setStatusFilter(prev => e.target.checked ? [...prev, s] : prev.filter(item => item !== s));
+                            }}
+                            style={{ margin: 0 }}
+                          />
+                          <span>{s}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="filter-field filter-type-field" style={{ position: "relative", width: 180 }}>
               <div 
                 onClick={() => setTypeDropdownOpen(!typeDropdownOpen)}
@@ -748,7 +887,7 @@ export default function Issues() {
             return sum + getLoggedForIssue(issue);
           }, 0);
           const totalFilteredLoggedHours = (totalFilteredLoggedSeconds / 3600).toFixed(1);
-          const issueTableLabels = ["Key", "Tóm tắt", "Người xử lý", "Trạng thái", "Loại", "Start Date", "Estimate", "Logged", "Tiến độ", "Cập nhật", "Hành động"];
+          const issueTableLabels = ["Key", "Tóm tắt", "Người xử lý", "Trạng thái", "Loại", "Start - End", "Estimate", "Logged", "Tiến độ", "Cập nhật", "Hành động"];
 
           return (
             <div className="table-wrap">
@@ -760,7 +899,7 @@ export default function Issues() {
                     <th>Người xử lý</th>
                     <th>Trạng thái</th>
                     <th>Loại</th>
-                    <th onClick={() => handleSort("startDate")} style={{ cursor: "pointer" }}>Start Date{sortIndicator("startDate")}</th>
+                    <th onClick={() => handleSort("startDate")} style={{ cursor: "pointer" }}>Start - End{sortIndicator("startDate")}</th>
                     <th onClick={() => handleSort("estimate")} style={{ cursor: "pointer" }}>Estimate{sortIndicator("estimate")}</th>
                     <th onClick={() => handleSort("logged")} style={{ cursor: "pointer" }}>Logged ({totalFilteredLoggedHours}h){sortIndicator("logged")}</th>
                     <th>Tiến độ</th>
@@ -816,7 +955,8 @@ export default function Issues() {
                   const log = getLoggedForIssue(issue);
                   const pct = est > 0 ? Math.round((log / est) * 100) : (log > 0 ? 100 : 0);
                   const updatedDate = new Date(issue.fields.updated).toLocaleDateString("vi-VN");
-                  const startDateStr = issue.fields.customfield_10300 ? new Date(issue.fields.customfield_10300).toLocaleDateString("vi-VN") : "—";
+                  const startDateStr = formatDateForDisplay(issue.fields.customfield_10300);
+                  const endDateStr = formatDateForDisplay(issue.fields.customfield_10302 || issue.fields.duedate);
 
                   return (
                     <tr key={issue.id}>
@@ -859,7 +999,28 @@ export default function Issues() {
                       <td data-label="Loại" style={{ fontSize: 11, color: "var(--text-muted)" }}>
                         {issue.fields.issuetype?.name || "—"}
                       </td>
-                      <td data-label="Start Date" style={{ fontSize: 11, color: "var(--text-primary)" }}>{startDateStr}</td>
+                      <td data-label="Start - End" style={{ fontSize: 11, color: "var(--text-primary)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ whiteSpace: "nowrap" }}>{startDateStr} - {endDateStr}</span>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ padding: "0 4px", height: 20, fontSize: 11, minHeight: 20 }}
+                            onClick={() => {
+                              setDateModalOpen({
+                                key: issue.key,
+                                summary: issue.fields.summary,
+                                startDate: getDateInputValue(issue.fields.customfield_10300),
+                                endDate: getDateInputValue(issue.fields.customfield_10302 || issue.fields.duedate),
+                              });
+                              setNewStartDate(getDateInputValue(issue.fields.customfield_10300));
+                              setNewEndDate(getDateInputValue(issue.fields.customfield_10302 || issue.fields.duedate));
+                            }}
+                            title="Sửa Start/End Date"
+                          >
+                            ✏️
+                          </button>
+                        </div>
+                      </td>
                       <td data-label="Estimate" style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 500 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                           {est ? formatSeconds(est) : <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>—</span>}
@@ -1708,6 +1869,49 @@ export default function Issues() {
                 onClick={handleEstimateSubmit}
               >
                 Lưu Estimate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Start/End Date Modal */}
+      {dateModalOpen && (
+        <div className="modal-overlay" onClick={() => !updatingDates && setDateModalOpen(null)}>
+          <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Cập nhật Start/End Date - {dateModalOpen.key}</div>
+              <button className="modal-close" onClick={() => !updatingDates && setDateModalOpen(null)}>✕</button>
+            </div>
+            <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 16, lineHeight: 1.45 }}>
+              {dateModalOpen.summary}
+            </div>
+            <div className="form-group">
+              <label>Start Date</label>
+              <input
+                type="date"
+                value={newStartDate}
+                onChange={(e) => setNewStartDate(e.target.value)}
+                disabled={updatingDates}
+              />
+            </div>
+            <div className="form-group">
+              <label>End Date</label>
+              <input
+                type="date"
+                value={newEndDate}
+                onChange={(e) => setNewEndDate(e.target.value)}
+                disabled={updatingDates}
+              />
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setDateModalOpen(null)} disabled={updatingDates}>Hủy</button>
+              <button
+                className="btn btn-primary"
+                disabled={updatingDates}
+                onClick={handleDateSubmit}
+              >
+                {updatingDates ? "Đang lưu..." : "Lưu ngày"}
               </button>
             </div>
           </div>
