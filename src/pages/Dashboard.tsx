@@ -125,11 +125,13 @@ function getIssueWorklogSeconds(
 }
 
 function getClosedIssueWorklogSeconds(issue: JiraIssue, currentUser: JiraUser | null): number {
-  if (issue.fields.worklog) {
-    return getIssueWorklogSeconds(issue, currentUser);
+  const loggedSeconds = getIssueLoggedSeconds(issue);
+
+  if (loggedSeconds === 0) {
+    return getIssueEstimatedSeconds(issue);
   }
 
-  return getIssueLoggedSeconds(issue);
+  return loggedSeconds;
 }
 
 function getTeamAssigneeKey(issue: JiraIssue): string {
