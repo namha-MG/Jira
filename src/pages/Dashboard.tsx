@@ -100,7 +100,6 @@ function getIssueClosedDate(issue: JiraIssue): Date | null {
   if (!isClosedForDashboard(issue)) return null;
   return (
     parseJiraDate(issue.fields.resolutiondate) ||
-    parseJiraDate(issue.fields.customfield_10302) ||
     parseJiraDate(issue.fields.updated)
   );
 }
