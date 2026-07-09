@@ -58,7 +58,12 @@ function isClosedForDashboard(issue: JiraIssue): boolean {
   const statusName = issue.fields.status?.name?.toLowerCase() || "";
   return (
     statusName.includes("close") ||
-    statusName.includes("đóng")
+    statusName.includes("đóng") ||
+    statusName.includes("resolve") ||
+    statusName.includes("done") ||
+    statusName.includes("hoàn thành") ||
+    statusName.includes("đã giải quyết") ||
+    statusName.includes("ready for test")
   );
 }
 
@@ -215,6 +220,7 @@ export default function Dashboard() {
   });
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [tempDetailedConfig, setTempDetailedConfig] = useState<Record<string, { ot: number, leave: number }>>({});
+  const [devLotBugFieldId, setDevLotBugFieldId] = useState<string | null>(null);
   
   const [suggestionText, setSuggestionText] = useState("");
   const [isGeneratingSuggestion, setIsGeneratingSuggestion] = useState(false);
@@ -635,6 +641,16 @@ export default function Dashboard() {
         console.warn("Lỗi lấy thông tin user", e);
       }
 
+      try {
+        const fields = await getJiraFields();
+        const devField = fields.find(f => f.name.toLowerCase() === "dev lọt bug");
+        if (devField) {
+          setDevLotBugFieldId(devField.id);
+        }
+      } catch (e) {
+        console.warn("Lỗi lấy danh sách fields", e);
+      }
+
       const projectKeys = jiraProjects.map((p) => p.key);
       const result = await getMyIssues({ projectKeys, maxResults: 2000 });
       const issuesWithFullWorklogs = [...result.issues];
@@ -741,10 +757,31 @@ export default function Dashboard() {
     return s + getIssueEstimatedSeconds(i);
   }, 0);
 
-  // Tính tổng thời gian đã log: chỉ tính những ticket đã được closed
+  // Tính tổng thời gian đã log: chỉ tính những ticket đã được closed theo điều kiện QA
   const totalLogged = filteredIssues.reduce((sum, issue) => {
     const closedDate = getIssueClosedDate(issue);
     if (!closedDate || !isDateInRange(closedDate, selectedRange)) return sum;
+
+    // QA Query logic: (labels != hashsubtask OR labels is EMPTY)
+    const labels = issue.fields.labels || [];
+    if (labels.some(l => l.toLowerCase() === "hashsubtask")) return sum;
+
+    // QA Query logic: originalEstimate is not EMPTY
+    const estimate = getIssueEstimatedSeconds(issue);
+    if (estimate <= 0) return sum;
+
+    // QA Query logic: ("Dev lọt bug" IS EMPTY OR "Dev lọt bug" != currentUser)
+    if (devLotBugFieldId && currentUser) {
+      const devLotBugValue = issue.fields[devLotBugFieldId];
+      if (devLotBugValue) {
+        const currentIdentityKeys = userIdentityKeys(currentUser);
+        const devLotBugKeys = userIdentityKeys(devLotBugValue);
+        if (currentIdentityKeys.some(key => devLotBugKeys.includes(key))) {
+          return sum; // Dev lọt bug is currentUser, exclude
+        }
+      }
+    }
+
     return sum + getClosedIssueWorklogSeconds(issue, currentUser);
   }, 0);
 
