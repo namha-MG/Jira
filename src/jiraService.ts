@@ -93,101 +93,6 @@ export type JiraIssue = {
     worklog?: {
       total: number;
       worklogs: JiraWorklog[];
-import axios from "axios";
-
-// Jira PAT được lưu trong localStorage
-const getAuthHeader = () => {
-  const pat = localStorage.getItem("jira_pat");
-  if (pat) {
-    return { Authorization: `Bearer ${pat}` };
-  }
-  const basic = localStorage.getItem("jira_basic");
-  if (basic) {
-    return { Authorization: `Basic ${basic}` };
-  }
-  return {};
-};
-
-const jiraApi = axios.create({
-  // Dùng proxy của Vite để tránh CORS + SSL self-signed
-  // /jira-api được rewrite thành https://20.84.97.109:3033 bởi vite.config.ts
-  baseURL: "/jira-api/rest/api/2",
-  headers: {
-    "Content-Type": "application/json",
-    Accept: "application/json",
-    "X-Atlassian-Token": "no-check",
-  },
-});
-
-export const jiraAgileApi = axios.create({
-  baseURL: "/jira-api/rest/agile/1.0",
-  headers: {
-    "Content-Type": "application/json",
-    Accept: "application/json",
-    "X-Atlassian-Token": "no-check",
-  },
-});
-
-export const greenhopperApi = axios.create({
-  baseURL: "/jira-api/rest/greenhopper/1.0",
-  headers: {
-    "Content-Type": "application/json",
-    Accept: "application/json",
-    "X-Atlassian-Token": "no-check",
-  },
-});
-
-jiraApi.interceptors.request.use((config) => {
-  config.headers = { ...config.headers, ...getAuthHeader() } as typeof config.headers;
-  return config;
-});
-jiraAgileApi.interceptors.request.use((config) => {
-  config.headers = { ...config.headers, ...getAuthHeader() } as typeof config.headers;
-  return config;
-});
-greenhopperApi.interceptors.request.use((config) => {
-  config.headers = { ...config.headers, ...getAuthHeader() } as typeof config.headers;
-  return config;
-});
-
-// ===============================================
-// TYPES
-// ===============================================
-export type JiraUser = {
-  accountId: string;
-  name?: string;
-  displayName: string;
-  emailAddress: string;
-  avatarUrls: { "48x48": string };
-};
-
-export type JiraIssue = {
-  id: string;
-  key: string;
-  fields: {
-    summary: string;
-    status: { name: string; statusCategory: { colorName: string } };
-    priority: { name: string; iconUrl: string };
-    assignee: JiraUser | null;
-    reporter: JiraUser | null;
-    timetracking: {
-      originalEstimate?: string;
-      remainingEstimate?: string;
-      timeSpent?: string;
-      originalEstimateSeconds?: number;
-      remainingEstimateSeconds?: number;
-      timeSpentSeconds?: number;
-    };
-    aggregatetimespent?: number;
-    aggregatetimeoriginalestimate?: number;
-    aggregateprogress?: {
-      progress: number;
-      total: number;
-      percent: number;
-    };
-    worklog?: {
-      total: number;
-      worklogs: JiraWorklog[];
     };
     created: string;
     updated: string;
@@ -384,6 +289,15 @@ export async function getAllIssuesByJql(
   jql: string,
   maxLimit: number = 2000
 ): Promise<JiraIssue[]> {
+  const fields = [
+    "summary", "status", "priority", "assignee", "reporter",
+    "timetracking", "worklog", "created", "updated", "resolutiondate", "duedate",
+    "project", "issuetype", "description", "customfield_10300", "customfield_10302", "parent", "subtasks", "attachment", "labels", "*navigable"
+  ];
+  let allIssues: JiraIssue[] = [];
+  let startAt = 0;
+  const maxResults = 100;
+
   while (true) {
     const res = await jiraApi.get("/search", {
       params: { jql, maxResults, startAt, fields: fields.join(",") },
@@ -1010,7 +924,7 @@ export async function getSprints(boardId: number, state?: string): Promise<JiraS
 }
 
 export async function getIssuesInSprint(sprintId: number, startAt: number = 0, maxResults: number = 100): Promise<{ issues: JiraIssue[]; total: number }> {
-  const fields = "summary,status,priority,assignee,timetracking,aggregatetimespent,aggregatetimeoriginalestimate,aggregateprogress,worklog,created,updated,resolutiondate,duedate,project,issuetype,customfield_10300,customfield_10302,parent,attachment";
+  const fields = "summary,status,priority,assignee,timetracking,aggregatetimespent,aggregatetimeoriginalestimate,aggregateprogress,worklog,created,updated,resolutiondate,duedate,project,issuetype,customfield_10300,customfield_10302,parent,attachment,labels,*navigable";
   const res = await jiraAgileApi.get(`/sprint/${sprintId}/issue`, {
     params: { startAt, maxResults, fields }
   });
