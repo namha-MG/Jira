@@ -114,7 +114,7 @@ app.post("/api/configs/:key", async (req, res) => {
 });
 
 app.post("/api/git-reconciliation", async (req, res) => {
-  const { date, projectKeys = [], jiraPat, gitPat, projectGitLinks } = req.body;
+  const { date, projectKeys = [], jiraPat, gitPat, projectGitLinks, gitAccounts, geminiKey, telegramBotToken, telegramChatId } = req.body;
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
     return res.status(400).json({ error: "date must be YYYY-MM-DD" });
   }
@@ -123,7 +123,7 @@ app.post("/api/git-reconciliation", async (req, res) => {
   try {
     await client.connect();
     const dbRes = await client.query(
-      "SELECT key, value FROM jira_app_configs WHERE key IN ('jira_pat', 'git_pat', 'git_project_links')"
+      "SELECT key, value FROM jira_app_configs WHERE key IN ('jira_pat', 'git_pat', 'git_project_links', 'git_accounts', 'gemini_api_key', 'telegram_bot_token', 'telegram_chat_id')"
     );
     const configMap = dbRes.rows.reduce<Record<string, string>>((acc, row) => {
       acc[row.key] = row.value;
@@ -133,6 +133,15 @@ app.post("/api/git-reconciliation", async (req, res) => {
     const effectiveJiraPat = String(jiraPat || configMap.jira_pat || "");
     const effectiveGitPat = String(gitPat || configMap.git_pat || "");
     const effectiveProjectGitLinks = projectGitLinks || configMap.git_project_links || "{}";
+    const effectiveGitAccounts = Array.isArray(gitAccounts)
+      ? gitAccounts
+      : String(gitAccounts || configMap.git_accounts || "")
+        .split(/[\n,;]+/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+    const effectiveGeminiKey = String(geminiKey || configMap.gemini_api_key || "");
+    const effectiveTelegramBotToken = String(telegramBotToken || configMap.telegram_bot_token || "");
+    const effectiveTelegramChatId = String(telegramChatId || configMap.telegram_chat_id || "");
     const effectiveProjectKeys = Array.isArray(projectKeys)
       ? projectKeys.map((key) => String(key).trim()).filter(Boolean)
       : [];
@@ -147,6 +156,10 @@ app.post("/api/git-reconciliation", async (req, res) => {
       jiraPat: effectiveJiraPat,
       gitPat: effectiveGitPat,
       projectGitLinks: effectiveProjectGitLinks,
+      gitAccounts: effectiveGitAccounts,
+      geminiKey: effectiveGeminiKey,
+      telegramBotToken: effectiveTelegramBotToken,
+      telegramChatId: effectiveTelegramChatId,
     });
     res.json(result);
   } catch (err: any) {

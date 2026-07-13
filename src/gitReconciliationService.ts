@@ -30,10 +30,16 @@ export type GitReconciliationRow = {
   commitCount: number;
 };
 
+export type TelegramReportStatus = {
+  sent: boolean;
+  error?: string;
+};
+
 export type GitReconciliationResult = {
   date: string;
   results: GitReconciliationRow[];
   repoErrors: { projectKey: string; repoUrl: string; error: string }[];
+  telegramReport: TelegramReportStatus;
   stats: {
     loggedTaskCount: number;
     matchedCount: number;
@@ -45,6 +51,9 @@ export type GitReconciliationResult = {
 
 export const GIT_PROJECT_LINKS_STORAGE_KEY = "git_project_links";
 export const GIT_PAT_STORAGE_KEY = "git_pat";
+export const GIT_ACCOUNTS_STORAGE_KEY = "git_accounts";
+export const TELEGRAM_BOT_TOKEN_STORAGE_KEY = "telegram_bot_token";
+export const TELEGRAM_CHAT_ID_STORAGE_KEY = "telegram_chat_id";
 
 export function getGitProjectLinks(): GitProjectLinks {
   try {
@@ -80,6 +89,13 @@ export async function runGitReconciliation(options: {
       jiraPat: localStorage.getItem("jira_pat") || "",
       gitPat: localStorage.getItem(GIT_PAT_STORAGE_KEY) || "",
       projectGitLinks: getGitProjectLinks(),
+      gitAccounts: (localStorage.getItem(GIT_ACCOUNTS_STORAGE_KEY) || "")
+        .split(/[\n,;]+/)
+        .map((value) => value.trim())
+        .filter(Boolean),
+      geminiKey: localStorage.getItem("gemini_api_key") || "",
+      telegramBotToken: localStorage.getItem(TELEGRAM_BOT_TOKEN_STORAGE_KEY) || "",
+      telegramChatId: localStorage.getItem(TELEGRAM_CHAT_ID_STORAGE_KEY) || "",
     }),
   });
 

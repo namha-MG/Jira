@@ -73,7 +73,12 @@ export default function GitReconciliation() {
     try {
       const data = await runGitReconciliation({ date, projectKeys: selectedProjectKeys });
       setResult(data);
-      addToast("success", "Đã chạy đối soát Git với worklog Jira trong ngày.");
+      addToast("success", data.telegramReport?.sent
+        ? "Đã chạy đối soát và gửi report Telegram."
+        : "Đã chạy đối soát Git với worklog Jira trong ngày.");
+      if (data.telegramReport && !data.telegramReport.sent && data.telegramReport.error) {
+        addToast("info", `Telegram: ${data.telegramReport.error}`);
+      }
     } catch (err: any) {
       addToast("error", err?.message || "Không chạy được đối soát Git.");
     } finally {
@@ -89,7 +94,7 @@ export default function GitReconciliation() {
       <div className="page-header">
         <div className="page-title-group">
           <h1 className="page-title">Đối soát Git</h1>
-          <p className="page-subtitle">Kiểm tra mỗi task đã log Jira trong ngày có ít nhất 1 commit Git khớp nội dung.</p>
+          <p className="page-subtitle">Kiểm tra task đã log Jira với commit Git của account cấu hình, dùng AI để so nội dung Việt-Anh và gửi report Telegram.</p>
         </div>
         <div className="page-actions" style={{ marginLeft: "auto" }}>
           <button className="btn btn-primary" onClick={handleRun} disabled={loading}>
@@ -176,6 +181,20 @@ export default function GitReconciliation() {
               </div>
             )}
 
+            {result.telegramReport && (
+              <div className={`connection-status ${result.telegramReport.sent ? "connected" : "error"}`}>
+                <span>{result.telegramReport.sent ? "✅" : "⚠️"}</span>
+                <div>
+                  <div style={{ fontWeight: 600 }}>
+                    {result.telegramReport.sent ? "Đã gửi report Telegram" : "Chưa gửi được report Telegram"}
+                  </div>
+                  {!result.telegramReport.sent && result.telegramReport.error && (
+                    <div style={{ fontSize: 12, opacity: 0.8 }}>{result.telegramReport.error}</div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {missingRows.length > 0 && (
               <div className="settings-section" style={{ borderColor: "rgba(239, 68, 68, 0.28)" }}>
                 <div className="settings-section-title">Task cần bổ sung commit</div>
@@ -190,7 +209,7 @@ export default function GitReconciliation() {
 
             <div className="chart-card">
               <div className="chart-title">Kết quả chi tiết</div>
-              <div className="chart-subtitle">Một task được tính đạt khi có ít nhất 1 commit trong ngày khớp issue key hoặc nội dung worklog/task.</div>
+              <div className="chart-subtitle">Một task được tính đạt khi có commit trong ngày khớp issue key hoặc được AI đánh giá phù hợp với nội dung task/worklog.</div>
               <div className="table-wrap">
                 <table>
                   <thead>

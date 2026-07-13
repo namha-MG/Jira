@@ -16,6 +16,11 @@ type GitCommit = {
   branches: string[];
 };
 
+type TelegramReportStatus = {
+  sent: boolean;
+  error?: string;
+};
+
 type LoggedTask = {
   issueKey: string;
   projectKey: string;
@@ -32,6 +37,15 @@ type GitIdentity = {
   ids: string[];
   names: string[];
   emails: string[];
+};
+
+type GitReconciliationResultRow = LoggedTask & {
+  status: "matched" | "missing";
+  matchedCommit: GitCommit | null;
+  matchScore: number;
+  matchReason: string;
+  repoCount: number;
+  commitCount: number;
 };
 
 const jiraHttpsAgent = new https.Agent({ rejectUnauthorized: false });
@@ -198,6 +212,25 @@ function compactUnique(values: unknown[]) {
   return Array.from(new Set(values.map(normalizeIdentityValue).filter(Boolean)));
 }
 
+function configuredAccountsToIdentity(accounts: string[] = []): GitIdentity {
+  const values = compactUnique(accounts.flatMap((account) => String(account).split(/[\n,;]+/)));
+  const emails = values.filter((value) => value.includes("@"));
+  const nonEmails = values.filter((value) => !value.includes("@"));
+  return {
+    ids: nonEmails,
+    names: nonEmails,
+    emails,
+  };
+}
+
+function mergeIdentities(...identities: GitIdentity[]) {
+  return {
+    ids: compactUnique(identities.flatMap((identity) => identity.ids)),
+    names: compactUnique(identities.flatMap((identity) => identity.names)),
+    emails: compactUnique(identities.flatMap((identity) => identity.emails)),
+  };
+}
+
 function identityMatches(identity: GitIdentity, candidate: {
   ids?: unknown[];
   names?: unknown[];
@@ -234,6 +267,10 @@ function requireGitPat(gitPat: string) {
   if (!gitPat.trim()) {
     throw new Error("Cần cấu hình Git PAT để lọc commit của user hiện tại.");
   }
+}
+
+function hasConfiguredAccounts(identity: GitIdentity) {
+  return identity.ids.length > 0 || identity.names.length > 0 || identity.emails.length > 0;
 }
 
 async function getGitLabIdentity(origin: string, gitPat: string): Promise<GitIdentity> {
@@ -350,10 +387,12 @@ async function fetchBitbucketBranches(repoUrl: string, gitPat: string) {
   return branches;
 }
 
-async function fetchGitLabCommits(repoUrl: string, gitPat: string, since: string, until: string): Promise<GitCommit[]> {
+async function fetchGitLabCommits(repoUrl: string, gitPat: string, since: string, until: string, configuredIdentity: GitIdentity): Promise<GitCommit[]> {
   requireGitPat(gitPat);
   const repo = parseRepoUrl(repoUrl);
-  const identity = await getGitLabIdentity(repo.origin, gitPat);
+  const identity = hasConfiguredAccounts(configuredIdentity)
+    ? configuredIdentity
+    : await getGitLabIdentity(repo.origin, gitPat);
   const branches = await fetchGitLabBranches(repoUrl, gitPat);
   const commits: GitCommit[] = [];
 
@@ -387,10 +426,12 @@ async function fetchGitLabCommits(repoUrl: string, gitPat: string, since: string
   return dedupeCommits(commits);
 }
 
-async function fetchGitHubCommits(repoUrl: string, gitPat: string, since: string, until: string): Promise<GitCommit[]> {
+async function fetchGitHubCommits(repoUrl: string, gitPat: string, since: string, until: string, configuredIdentity: GitIdentity): Promise<GitCommit[]> {
   requireGitPat(gitPat);
   const repo = parseRepoUrl(repoUrl);
-  const identity = await getGitHubIdentity(gitPat);
+  const identity = hasConfiguredAccounts(configuredIdentity)
+    ? configuredIdentity
+    : await getGitHubIdentity(gitPat);
   const branches = await fetchGitHubBranches(repoUrl, gitPat);
   const commits: GitCommit[] = [];
 
@@ -429,10 +470,12 @@ async function fetchGitHubCommits(repoUrl: string, gitPat: string, since: string
   return dedupeCommits(commits);
 }
 
-async function fetchBitbucketCommits(repoUrl: string, gitPat: string, since: string, until: string): Promise<GitCommit[]> {
+async function fetchBitbucketCommits(repoUrl: string, gitPat: string, since: string, until: string, configuredIdentity: GitIdentity): Promise<GitCommit[]> {
   requireGitPat(gitPat);
   const repo = parseRepoUrl(repoUrl);
-  const identity = await getBitbucketIdentity(gitPat);
+  const identity = hasConfiguredAccounts(configuredIdentity)
+    ? configuredIdentity
+    : await getBitbucketIdentity(gitPat);
   const branches = await fetchBitbucketBranches(repoUrl, gitPat);
   const commits: GitCommit[] = [];
 
@@ -474,19 +517,102 @@ async function fetchBitbucketCommits(repoUrl: string, gitPat: string, since: str
   return dedupeCommits(commits);
 }
 
-async function fetchRepoCommits(repoUrl: string, gitPat: string, since: string, until: string) {
+async function fetchRepoCommits(repoUrl: string, gitPat: string, since: string, until: string, configuredIdentity: GitIdentity) {
   const { provider } = parseRepoUrl(repoUrl);
-  if (provider === "github") return fetchGitHubCommits(repoUrl, gitPat, since, until);
-  if (provider === "bitbucket") return fetchBitbucketCommits(repoUrl, gitPat, since, until);
-  return fetchGitLabCommits(repoUrl, gitPat, since, until);
+  if (provider === "github") return fetchGitHubCommits(repoUrl, gitPat, since, until, configuredIdentity);
+  if (provider === "bitbucket") return fetchBitbucketCommits(repoUrl, gitPat, since, until, configuredIdentity);
+  return fetchGitLabCommits(repoUrl, gitPat, since, until, configuredIdentity);
 }
 
-function matchCommit(task: LoggedTask, commits: GitCommit[]) {
+function extractJsonObject(value: string) {
+  const fenced = value.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const raw = fenced?.[1] || value;
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    return JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+async function aiMatchCommit(task: LoggedTask, commits: GitCommit[], geminiKey?: string) {
+  if (!geminiKey || commits.length === 0) return null;
+
+  const candidates = commits.slice(0, 40).map((commit, index) => ({
+    index,
+    sha: commit.shortSha,
+    message: commit.message.split(/\r?\n/).slice(0, 4).join("\n"),
+    author: commit.authorName,
+    branches: commit.branches,
+  }));
+
+  const taskText = [
+    `Jira key: ${task.issueKey}`,
+    `Vietnamese title: ${task.summary}`,
+    `Vietnamese worklog notes: ${task.worklogs.map((worklog) => worklog.comment).filter(Boolean).join(" | ") || "N/A"}`,
+  ].join("\n");
+
+  const prompt = `You are auditing whether Git commits are semantically related to a Jira task.
+The Jira task title/worklog may be Vietnamese, while commit messages may be English.
+Choose exactly one commit only if the commit meaning clearly supports the Jira task work.
+Do not match generic commits. Prefer a conservative decision.
+
+${taskText}
+
+Candidate commits:
+${JSON.stringify(candidates, null, 2)}
+
+Return only JSON with this shape:
+{"matchedIndex": number|null, "score": number, "reason": "short Vietnamese explanation"}
+Use score 0..1. matchedIndex must be null if no commit is relevant.`;
+
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 300 },
+      }),
+    });
+
+    if (!response.ok) return null;
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+    const parsed = extractJsonObject(text);
+    const matchedIndex = parsed?.matchedIndex;
+    const score = Number(parsed?.score || 0);
+
+    if (matchedIndex === null || matchedIndex === undefined || Number.isNaN(score) || score < 0.65) {
+      return null;
+    }
+
+    const candidate = candidates.find((item) => item.index === Number(matchedIndex));
+    const commit = candidate ? commits[candidate.index] : null;
+    if (!commit) return null;
+
+    return {
+      commit,
+      score: Math.min(1, Math.max(0, score)),
+      reason: parsed?.reason ? `AI semantic match: ${String(parsed.reason)}` : "AI semantic match nội dung task/commit",
+    };
+  } catch (err) {
+    console.warn("AI commit matching skipped:", err);
+    return null;
+  }
+}
+
+async function matchCommit(task: LoggedTask, commits: GitCommit[], geminiKey?: string) {
   const issuePattern = new RegExp(`(^|[^A-Z0-9])${escapeRegExp(task.issueKey)}([^A-Z0-9]|$)`, "i");
   const direct = commits.find((commit) => issuePattern.test(commit.message));
   if (direct) {
     return { commit: direct, score: 1, reason: "Issue key trong commit message" };
   }
+
+  const aiMatch = await aiMatchCommit(task, commits, geminiKey);
+  if (aiMatch) return aiMatch;
 
   const taskText = [
     task.summary,
@@ -510,14 +636,93 @@ function matchCommit(task: LoggedTask, commits: GitCommit[]) {
   return best;
 }
 
+function truncateTelegramText(text: string) {
+  return text.length > 3900 ? `${text.slice(0, 3890)}\n...` : text;
+}
+
+function formatTelegramReport(options: {
+  date: string;
+  gitAccounts: string[];
+  rows: GitReconciliationResultRow[];
+  repoErrors: { projectKey: string; repoUrl: string; error: string }[];
+  stats: { loggedTaskCount: number; matchedCount: number; missingCount: number; repoCount: number; commitCount: number };
+}) {
+  const missingRows = options.rows.filter((row) => row.status === "missing");
+  const matchedRows = options.rows.filter((row) => row.status === "matched");
+  const accountText = options.gitAccounts.length > 0 ? options.gitAccounts.join(", ") : "Theo Git PAT hiện tại";
+
+  const lines = [
+    `Git/Jira reconciliation report - ${options.date}`,
+    `Accounts: ${accountText}`,
+    `Tasks: ${options.stats.loggedTaskCount} | Matched: ${options.stats.matchedCount} | Missing: ${options.stats.missingCount}`,
+    `Repos: ${options.stats.repoCount} | Commits scanned: ${options.stats.commitCount}`,
+    "",
+  ];
+
+  if (missingRows.length > 0) {
+    lines.push("Missing commits:");
+    for (const row of missingRows.slice(0, 20)) {
+      lines.push(`- ${row.issueKey} [${row.projectKey}] ${row.summary}`);
+      lines.push(`  Reason: ${row.matchReason}`);
+    }
+    lines.push("");
+  }
+
+  if (matchedRows.length > 0) {
+    lines.push("Matched tasks:");
+    for (const row of matchedRows.slice(0, 20)) {
+      lines.push(`- ${row.issueKey}: ${row.matchedCommit?.shortSha || "-"} (${row.matchReason}, score ${row.matchScore})`);
+      if (row.matchedCommit) {
+        lines.push(`  ${row.matchedCommit.message.split(/\r?\n/)[0] || ""}`);
+      }
+    }
+    lines.push("");
+  }
+
+  if (options.repoErrors.length > 0) {
+    lines.push("Repo errors:");
+    for (const error of options.repoErrors.slice(0, 10)) {
+      lines.push(`- ${error.projectKey}: ${error.repoUrl} - ${error.error}`);
+    }
+  }
+
+  return truncateTelegramText(lines.join("\n"));
+}
+
+async function sendTelegramReport(botToken: string, chatId: string, text: string): Promise<TelegramReportStatus> {
+  if (!botToken.trim() || !chatId.trim()) {
+    return { sent: false, error: "Chưa cấu hình Telegram bot token/chat id" };
+  }
+
+  try {
+    await axios.post(`https://api.telegram.org/bot${botToken.trim()}/sendMessage`, {
+      chat_id: chatId.trim(),
+      text,
+      disable_web_page_preview: true,
+    });
+    return { sent: true };
+  } catch (err: any) {
+    return {
+      sent: false,
+      error: err?.response?.data?.description || err?.message || "Không gửi được Telegram report",
+    };
+  }
+}
+
 export async function runGitReconciliation(options: {
   date: string;
   projectKeys: string[];
   jiraPat: string;
   gitPat: string;
   projectGitLinks: string | ProjectGitLinks;
+  gitAccounts?: string[];
+  geminiKey?: string;
+  telegramBotToken?: string;
+  telegramChatId?: string;
 }) {
   const projectGitLinks = parseJsonConfig<ProjectGitLinks>(options.projectGitLinks, {});
+  const gitAccounts = compactUnique(options.gitAccounts || []);
+  const configuredIdentity = configuredAccountsToIdentity(gitAccounts);
   const since = startOfDayIso(options.date);
   const until = endOfDayIso(options.date);
   const loggedTasks = await getLoggedTasksForDate(options.jiraPat, options.date, options.projectKeys);
@@ -531,7 +736,7 @@ export async function runGitReconciliation(options: {
 
     for (const repoUrl of repoUrls.filter((url) => url.trim())) {
       try {
-        const commits = await fetchRepoCommits(repoUrl, options.gitPat, since, until);
+        const commits = await fetchRepoCommits(repoUrl, options.gitPat, since, until, configuredIdentity);
         commitsByProject[projectKey].push(...commits);
       } catch (err: any) {
         repoErrors.push({
@@ -543,12 +748,13 @@ export async function runGitReconciliation(options: {
     }
   }
 
-  const results = loggedTasks.map((task) => {
+  const results: GitReconciliationResultRow[] = [];
+  for (const task of loggedTasks) {
     const configuredRepos = projectGitLinks[task.projectKey] || [];
     const projectCommits = commitsByProject[task.projectKey] || [];
-    const match = configuredRepos.length > 0 ? matchCommit(task, projectCommits) : null;
+    const match = configuredRepos.length > 0 ? await matchCommit(task, projectCommits, options.geminiKey) : null;
 
-    return {
+    results.push({
       ...task,
       status: match ? "matched" : "missing",
       matchedCommit: match?.commit || null,
@@ -556,21 +762,34 @@ export async function runGitReconciliation(options: {
       matchReason: match?.reason || (configuredRepos.length === 0 ? "Chưa cấu hình repo Git cho project" : "Không có commit khớp task trong ngày"),
       repoCount: configuredRepos.length,
       commitCount: projectCommits.length,
-    };
-  });
+    });
+  }
 
   const matchedCount = results.filter((row) => row.status === "matched").length;
+  const stats = {
+    loggedTaskCount: results.length,
+    matchedCount,
+    missingCount: results.length - matchedCount,
+    repoCount: Object.values(projectGitLinks).reduce((sum, repos) => sum + repos.length, 0),
+    commitCount: Object.values(commitsByProject).reduce((sum, commits) => sum + commits.length, 0),
+  };
+  const telegramReport = await sendTelegramReport(
+    options.telegramBotToken || "",
+    options.telegramChatId || "",
+    formatTelegramReport({
+      date: options.date,
+      gitAccounts,
+      rows: results,
+      repoErrors,
+      stats,
+    })
+  );
 
   return {
     date: options.date,
     results,
     repoErrors,
-    stats: {
-      loggedTaskCount: results.length,
-      matchedCount,
-      missingCount: results.length - matchedCount,
-      repoCount: Object.values(projectGitLinks).reduce((sum, repos) => sum + repos.length, 0),
-      commitCount: Object.values(commitsByProject).reduce((sum, commits) => sum + commits.length, 0),
-    },
+    telegramReport,
+    stats,
   };
 }

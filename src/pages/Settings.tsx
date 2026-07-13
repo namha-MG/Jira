@@ -10,9 +10,12 @@ import {
 } from "../config";
 import { getHolidays, saveHolidays, DEFAULT_HOLIDAYS } from "../utils";
 import {
+  GIT_ACCOUNTS_STORAGE_KEY,
   GIT_PAT_STORAGE_KEY,
   GIT_PROJECT_LINKS_STORAGE_KEY,
   GitProjectLinks,
+  TELEGRAM_BOT_TOKEN_STORAGE_KEY,
+  TELEGRAM_CHAT_ID_STORAGE_KEY,
   getGitProjectLinks,
   saveGitProjectLinks,
 } from "../gitReconciliationService";
@@ -23,6 +26,9 @@ export default function Settings() {
   const [pat, setPat] = useState(() => localStorage.getItem("jira_pat") || "");
   const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
   const [gitPat, setGitPat] = useState(() => localStorage.getItem(GIT_PAT_STORAGE_KEY) || "");
+  const [gitAccounts, setGitAccounts] = useState(() => localStorage.getItem(GIT_ACCOUNTS_STORAGE_KEY) || "");
+  const [telegramBotToken, setTelegramBotToken] = useState(() => localStorage.getItem(TELEGRAM_BOT_TOKEN_STORAGE_KEY) || "");
+  const [telegramChatId, setTelegramChatId] = useState(() => localStorage.getItem(TELEGRAM_CHAT_ID_STORAGE_KEY) || "");
   const [projectGitLinks, setProjectGitLinks] = useState<GitProjectLinks>(() => getGitProjectLinks());
   const [authorizedCloseTeam, setAuthorizedCloseTeam] = useState(() => localStorage.getItem("authorized_close_team") || "");
   const [jiraUrl, setJiraUrl] = useState(() => localStorage.getItem("jira_url") || JIRA_BASE_URL);
@@ -39,6 +45,7 @@ export default function Settings() {
   const [showPat, setShowPat] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [showGitPat, setShowGitPat] = useState(false);
+  const [showTelegramBotToken, setShowTelegramBotToken] = useState(false);
 
   // Trích xuất Tenant ID từ authority URL (e.g. login.microsoftonline.com/TENANT_ID)
   const tenantId = msalConfig.auth.authority.split("/").pop() || "";
@@ -100,6 +107,46 @@ export default function Settings() {
       })
       .catch(e => console.warn("Lỗi tải Git PAT từ DB", e));
 
+    fetch("/api/configs/git_accounts")
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.value) {
+          setGitAccounts(data.value);
+          localStorage.setItem(GIT_ACCOUNTS_STORAGE_KEY, data.value);
+        }
+      })
+      .catch(e => console.warn("Lỗi tải danh sách Git account từ DB", e));
+
+    fetch("/api/configs/gemini_api_key")
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.value) {
+          setGeminiKey(data.value);
+          localStorage.setItem("gemini_api_key", data.value);
+        }
+      })
+      .catch(e => console.warn("Lỗi tải Gemini API Key từ DB", e));
+
+    fetch("/api/configs/telegram_bot_token")
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.value) {
+          setTelegramBotToken(data.value);
+          localStorage.setItem(TELEGRAM_BOT_TOKEN_STORAGE_KEY, data.value);
+        }
+      })
+      .catch(e => console.warn("Lỗi tải Telegram bot token từ DB", e));
+
+    fetch("/api/configs/telegram_chat_id")
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.value) {
+          setTelegramChatId(data.value);
+          localStorage.setItem(TELEGRAM_CHAT_ID_STORAGE_KEY, data.value);
+        }
+      })
+      .catch(e => console.warn("Lỗi tải Telegram chat id từ DB", e));
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -150,6 +197,21 @@ export default function Settings() {
     } else {
       localStorage.removeItem(GIT_PAT_STORAGE_KEY);
     }
+    if (gitAccounts.trim()) {
+      localStorage.setItem(GIT_ACCOUNTS_STORAGE_KEY, gitAccounts.trim());
+    } else {
+      localStorage.removeItem(GIT_ACCOUNTS_STORAGE_KEY);
+    }
+    if (telegramBotToken.trim()) {
+      localStorage.setItem(TELEGRAM_BOT_TOKEN_STORAGE_KEY, telegramBotToken.trim());
+    } else {
+      localStorage.removeItem(TELEGRAM_BOT_TOKEN_STORAGE_KEY);
+    }
+    if (telegramChatId.trim()) {
+      localStorage.setItem(TELEGRAM_CHAT_ID_STORAGE_KEY, telegramChatId.trim());
+    } else {
+      localStorage.removeItem(TELEGRAM_CHAT_ID_STORAGE_KEY);
+    }
     const normalizedProjectGitLinks = Object.fromEntries(
       Object.entries(projectGitLinks).map(([projectKey, links]) => [
         projectKey,
@@ -194,15 +256,35 @@ export default function Settings() {
     }
 
     try {
+      await fetch("/api/configs/gemini_api_key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: geminiKey.trim() })
+      });
       await fetch("/api/configs/git_pat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ value: gitPat.trim() })
       });
+      await fetch("/api/configs/git_accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: gitAccounts.trim() })
+      });
       await fetch("/api/configs/git_project_links", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ value: JSON.stringify(normalizedProjectGitLinks) })
+      });
+      await fetch("/api/configs/telegram_bot_token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: telegramBotToken.trim() })
+      });
+      await fetch("/api/configs/telegram_chat_id", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: telegramChatId.trim() })
       });
     } catch (e) {
       console.warn("Failed to sync Git config to backend", e);
@@ -248,12 +330,18 @@ export default function Settings() {
     localStorage.removeItem("jira_basic");
     localStorage.removeItem("jira_url");
     localStorage.removeItem("gemini_api_key");
+    localStorage.removeItem(GIT_ACCOUNTS_STORAGE_KEY);
     localStorage.removeItem(GIT_PAT_STORAGE_KEY);
     localStorage.removeItem(GIT_PROJECT_LINKS_STORAGE_KEY);
+    localStorage.removeItem(TELEGRAM_BOT_TOKEN_STORAGE_KEY);
+    localStorage.removeItem(TELEGRAM_CHAT_ID_STORAGE_KEY);
     setPat("");
     setJiraUrl(JIRA_BASE_URL);
     setGeminiKey("");
     setGitPat("");
+    setGitAccounts("");
+    setTelegramBotToken("");
+    setTelegramChatId("");
     setProjectGitLinks({});
     setConnStatus(null);
     addToast("info", "🗑️ Đã xóa thông tin kết nối");
@@ -519,6 +607,65 @@ export default function Settings() {
                 />
                 <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                   Token cần quyền đọc repository/commit. Với repo public có thể để trống, nhưng repo private cần PAT.
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="input-git-accounts">Danh sách tài khoản Git cần đối soát</label>
+                <textarea
+                  id="input-git-accounts"
+                  value={gitAccounts}
+                  onChange={(e) => setGitAccounts(e.target.value)}
+                  placeholder="Mỗi dòng một username/email/display name. Ví dụ: namha, namha@etc.vn"
+                  rows={3}
+                />
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                  Nếu để trống, hệ thống chỉ lấy commit thuộc Git PAT hiện tại. Nếu có danh sách này, chỉ commit khớp các account trong danh sách mới được đối soát.
+                </div>
+              </div>
+
+              <div
+                style={{
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  padding: 12,
+                  background: "rgba(255,255,255,0.02)",
+                  marginBottom: 16,
+                }}
+              >
+                <div style={{ fontWeight: 700, color: "var(--text-primary)", marginBottom: 8 }}>
+                  Báo cáo Telegram
+                </div>
+                <div className="form-group">
+                  <label htmlFor="input-telegram-bot-token">
+                    Telegram Bot Token
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ marginLeft: 8, padding: "2px 6px", fontSize: 11 }}
+                      onClick={() => setShowTelegramBotToken((v) => !v)}
+                    >
+                      {showTelegramBotToken ? "🙈 Ẩn" : "👁️ Hiện"}
+                    </button>
+                  </label>
+                  <input
+                    id="input-telegram-bot-token"
+                    type={showTelegramBotToken ? "text" : "password"}
+                    value={telegramBotToken}
+                    onChange={(e) => setTelegramBotToken(e.target.value)}
+                    placeholder="123456789:AA..."
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="input-telegram-chat-id">Telegram Chat ID</label>
+                  <input
+                    id="input-telegram-chat-id"
+                    type="text"
+                    value={telegramChatId}
+                    onChange={(e) => setTelegramChatId(e.target.value)}
+                    placeholder="-1001234567890 hoặc chat id cá nhân"
+                  />
                 </div>
               </div>
 
