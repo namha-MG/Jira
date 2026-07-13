@@ -4,7 +4,7 @@ import { Client } from "pg";
 import dotenv from "dotenv";
 import path from "path";
 import { createProxyMiddleware } from "http-proxy-middleware";
-import { startCronJobs, triggerManualJob } from "./cron";
+import { startCronJobs, triggerGitReconciliationJob, triggerManualJob } from "./cron";
 import { runGitReconciliation } from "./gitReconciliation";
 
 dotenv.config();
@@ -206,6 +206,16 @@ app.post("/api/jobs/trigger", async (req, res) => {
     res.json({ success: true, message: "Job started in background" });
   } catch (err) {
     console.error("Error triggering job:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/api/git-reconciliation/trigger-job", async (req, res) => {
+  try {
+    triggerGitReconciliationJob().catch(err => console.error("Manual Git reconciliation job failed:", err));
+    res.json({ success: true, message: "Git reconciliation job started in background" });
+  } catch (err) {
+    console.error("Error triggering Git reconciliation job:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });

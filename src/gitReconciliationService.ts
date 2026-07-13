@@ -64,6 +64,8 @@ export const GIT_PAT_STORAGE_KEY = "git_pat";
 export const GIT_ACCOUNTS_STORAGE_KEY = "git_accounts";
 export const TELEGRAM_BOT_TOKEN_STORAGE_KEY = "telegram_bot_token";
 export const TELEGRAM_CHAT_ID_STORAGE_KEY = "telegram_chat_id";
+export const GIT_RECONCILIATION_ENABLED_STORAGE_KEY = "git_reconciliation_enabled";
+export const GIT_RECONCILIATION_TIME_STORAGE_KEY = "git_reconciliation_time";
 
 export function getGitProjectLinks(): GitProjectLinks {
   try {

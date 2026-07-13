@@ -13,6 +13,8 @@ import {
   GIT_ACCOUNTS_STORAGE_KEY,
   GIT_PAT_STORAGE_KEY,
   GIT_PROJECT_LINKS_STORAGE_KEY,
+  GIT_RECONCILIATION_ENABLED_STORAGE_KEY,
+  GIT_RECONCILIATION_TIME_STORAGE_KEY,
   GitProjectLinks,
   TELEGRAM_BOT_TOKEN_STORAGE_KEY,
   TELEGRAM_CHAT_ID_STORAGE_KEY,
@@ -29,6 +31,8 @@ export default function Settings() {
   const [gitAccounts, setGitAccounts] = useState(() => localStorage.getItem(GIT_ACCOUNTS_STORAGE_KEY) || "");
   const [telegramBotToken, setTelegramBotToken] = useState(() => localStorage.getItem(TELEGRAM_BOT_TOKEN_STORAGE_KEY) || "");
   const [telegramChatId, setTelegramChatId] = useState(() => localStorage.getItem(TELEGRAM_CHAT_ID_STORAGE_KEY) || "");
+  const [gitReconciliationEnabled, setGitReconciliationEnabled] = useState(() => localStorage.getItem(GIT_RECONCILIATION_ENABLED_STORAGE_KEY) === "true");
+  const [gitReconciliationTime, setGitReconciliationTime] = useState(() => localStorage.getItem(GIT_RECONCILIATION_TIME_STORAGE_KEY) || "18:00");
   const [projectGitLinks, setProjectGitLinks] = useState<GitProjectLinks>(() => getGitProjectLinks());
   const [authorizedCloseTeam, setAuthorizedCloseTeam] = useState(() => localStorage.getItem("authorized_close_team") || "");
   const [jiraUrl, setJiraUrl] = useState(() => localStorage.getItem("jira_url") || JIRA_BASE_URL);
@@ -147,6 +151,26 @@ export default function Settings() {
       })
       .catch(e => console.warn("Lỗi tải Telegram chat id từ DB", e));
 
+    fetch("/api/configs/git_reconciliation_enabled")
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.value !== null) {
+          setGitReconciliationEnabled(data.value === "true");
+          localStorage.setItem(GIT_RECONCILIATION_ENABLED_STORAGE_KEY, String(data.value === "true"));
+        }
+      })
+      .catch(e => console.warn("Lỗi tải trạng thái job đối soát Git từ DB", e));
+
+    fetch("/api/configs/git_reconciliation_time")
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.value) {
+          setGitReconciliationTime(data.value);
+          localStorage.setItem(GIT_RECONCILIATION_TIME_STORAGE_KEY, data.value);
+        }
+      })
+      .catch(e => console.warn("Lỗi tải giờ chạy job đối soát Git từ DB", e));
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -212,6 +236,8 @@ export default function Settings() {
     } else {
       localStorage.removeItem(TELEGRAM_CHAT_ID_STORAGE_KEY);
     }
+    localStorage.setItem(GIT_RECONCILIATION_ENABLED_STORAGE_KEY, String(gitReconciliationEnabled));
+    localStorage.setItem(GIT_RECONCILIATION_TIME_STORAGE_KEY, gitReconciliationTime || "18:00");
     const normalizedProjectGitLinks = Object.fromEntries(
       Object.entries(projectGitLinks).map(([projectKey, links]) => [
         projectKey,
@@ -276,6 +302,21 @@ export default function Settings() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ value: JSON.stringify(normalizedProjectGitLinks) })
       });
+      await fetch("/api/configs/selected_jira_projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: JSON.stringify(selectedProjectKeys) })
+      });
+      await fetch("/api/configs/git_reconciliation_enabled", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: String(gitReconciliationEnabled) })
+      });
+      await fetch("/api/configs/git_reconciliation_time", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: gitReconciliationTime || "18:00" })
+      });
       await fetch("/api/configs/telegram_bot_token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -333,6 +374,8 @@ export default function Settings() {
     localStorage.removeItem(GIT_ACCOUNTS_STORAGE_KEY);
     localStorage.removeItem(GIT_PAT_STORAGE_KEY);
     localStorage.removeItem(GIT_PROJECT_LINKS_STORAGE_KEY);
+    localStorage.removeItem(GIT_RECONCILIATION_ENABLED_STORAGE_KEY);
+    localStorage.removeItem(GIT_RECONCILIATION_TIME_STORAGE_KEY);
     localStorage.removeItem(TELEGRAM_BOT_TOKEN_STORAGE_KEY);
     localStorage.removeItem(TELEGRAM_CHAT_ID_STORAGE_KEY);
     setPat("");
@@ -340,6 +383,8 @@ export default function Settings() {
     setGeminiKey("");
     setGitPat("");
     setGitAccounts("");
+    setGitReconciliationEnabled(false);
+    setGitReconciliationTime("18:00");
     setTelegramBotToken("");
     setTelegramChatId("");
     setProjectGitLinks({});
@@ -583,6 +628,41 @@ export default function Settings() {
               <div className="settings-section-title">🔍 Cấu hình đối soát Git</div>
               <div className="settings-section-desc">
                 Khai báo Git Personal Access Token và các repo tương ứng với từng project Jira. Một project có thể gắn nhiều repo.
+              </div>
+
+              <div
+                style={{
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  padding: 12,
+                  background: "rgba(79,142,247,0.05)",
+                  marginBottom: 16,
+                }}
+              >
+                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={gitReconciliationEnabled}
+                    onChange={(e) => setGitReconciliationEnabled(e.target.checked)}
+                    style={{ width: 18, height: 18, cursor: "pointer" }}
+                  />
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+                    Bật job đối soát Git hằng ngày
+                  </span>
+                </label>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="input-git-reconciliation-time">Giờ chạy mỗi ngày</label>
+                  <input
+                    id="input-git-reconciliation-time"
+                    type="time"
+                    value={gitReconciliationTime}
+                    onChange={(e) => setGitReconciliationTime(e.target.value)}
+                    style={{ maxWidth: 180 }}
+                  />
+                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                    Job chạy theo timezone Asia/Ho_Chi_Minh, ghi log trong Lịch sử Job Tự động và gửi report Telegram nếu đã cấu hình.
+                  </div>
+                </div>
               </div>
 
               <div className="form-group">

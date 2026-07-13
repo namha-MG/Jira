@@ -86,6 +86,20 @@ export default function GitReconciliation() {
     }
   };
 
+  const handleTriggerJob = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/git-reconciliation/trigger-job", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Không kích hoạt được job đối soát Git.");
+      addToast("success", "Đã kích hoạt job đối soát Git trong nền.");
+    } catch (err: any) {
+      addToast("error", err?.message || "Không kích hoạt được job đối soát Git.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const rows = result?.results || [];
   const missingRows = rows.filter((row) => row.status === "missing");
 
@@ -97,6 +111,9 @@ export default function GitReconciliation() {
           <p className="page-subtitle">Kiểm tra task đã log Jira với commit Git của account cấu hình, dùng AI để so nội dung Việt-Anh và gửi report Telegram.</p>
         </div>
         <div className="page-actions" style={{ marginLeft: "auto" }}>
+          <button className="btn btn-secondary" onClick={handleTriggerJob} disabled={loading}>
+            Chạy job nền
+          </button>
           <button className="btn btn-primary" onClick={handleRun} disabled={loading}>
             {loading ? <><span className="spinning">⏳</span> Đang đối soát...</> : "Chạy đối soát"}
           </button>
