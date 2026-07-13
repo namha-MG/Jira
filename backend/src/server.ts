@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import path from "path";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import { startCronJobs, triggerManualJob } from "./cron";
+import { runGitReconciliation } from "./gitReconciliation";
 
 dotenv.config();
 
@@ -107,6 +108,50 @@ app.post("/api/configs/:key", async (req, res) => {
   } catch (err) {
     console.error("Error saving config:", err);
     res.status(500).json({ error: "Internal server error" });
+  } finally {
+    await client.end();
+  }
+});
+
+app.post("/api/git-reconciliation", async (req, res) => {
+  const { date, projectKeys = [], jiraPat, gitPat, projectGitLinks } = req.body;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
+    return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+  }
+
+  const client = new Client({ connectionString: POSTGRES_URL });
+  try {
+    await client.connect();
+    const dbRes = await client.query(
+      "SELECT key, value FROM jira_app_configs WHERE key IN ('jira_pat', 'git_pat', 'git_project_links')"
+    );
+    const configMap = dbRes.rows.reduce<Record<string, string>>((acc, row) => {
+      acc[row.key] = row.value;
+      return acc;
+    }, {});
+
+    const effectiveJiraPat = String(jiraPat || configMap.jira_pat || "");
+    const effectiveGitPat = String(gitPat || configMap.git_pat || "");
+    const effectiveProjectGitLinks = projectGitLinks || configMap.git_project_links || "{}";
+    const effectiveProjectKeys = Array.isArray(projectKeys)
+      ? projectKeys.map((key) => String(key).trim()).filter(Boolean)
+      : [];
+
+    if (!effectiveJiraPat) {
+      return res.status(400).json({ error: "Missing Jira PAT. Vui lòng lưu Jira PAT trong Settings." });
+    }
+
+    const result = await runGitReconciliation({
+      date: String(date),
+      projectKeys: effectiveProjectKeys,
+      jiraPat: effectiveJiraPat,
+      gitPat: effectiveGitPat,
+      projectGitLinks: effectiveProjectGitLinks,
+    });
+    res.json(result);
+  } catch (err: any) {
+    console.error("Git reconciliation failed:", err?.response?.data || err);
+    res.status(500).json({ error: err?.response?.data?.errorMessages?.[0] || err?.message || "Internal server error" });
   } finally {
     await client.end();
   }

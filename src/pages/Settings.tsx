@@ -9,12 +9,21 @@ import {
   saveSelectedProjectKeys,
 } from "../config";
 import { getHolidays, saveHolidays, DEFAULT_HOLIDAYS } from "../utils";
+import {
+  GIT_PAT_STORAGE_KEY,
+  GIT_PROJECT_LINKS_STORAGE_KEY,
+  GitProjectLinks,
+  getGitProjectLinks,
+  saveGitProjectLinks,
+} from "../gitReconciliationService";
 
 interface Toast { id: number; type: "success" | "error" | "info"; msg: string; }
 
 export default function Settings() {
   const [pat, setPat] = useState(() => localStorage.getItem("jira_pat") || "");
   const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
+  const [gitPat, setGitPat] = useState(() => localStorage.getItem(GIT_PAT_STORAGE_KEY) || "");
+  const [projectGitLinks, setProjectGitLinks] = useState<GitProjectLinks>(() => getGitProjectLinks());
   const [authorizedCloseTeam, setAuthorizedCloseTeam] = useState(() => localStorage.getItem("authorized_close_team") || "");
   const [jiraUrl, setJiraUrl] = useState(() => localStorage.getItem("jira_url") || JIRA_BASE_URL);
   const [selectedProjectKeys, setSelectedProjectKeys] = useState<string[]>(() => getSelectedProjectKeys());
@@ -29,6 +38,7 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [showPat, setShowPat] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [showGitPat, setShowGitPat] = useState(false);
 
   // Trích xuất Tenant ID từ authority URL (e.g. login.microsoftonline.com/TENANT_ID)
   const tenantId = msalConfig.auth.authority.split("/").pop() || "";
@@ -68,6 +78,27 @@ export default function Settings() {
         }
       })
       .catch(e => console.warn("Lỗi tải cấu hình phân quyền từ DB", e));
+
+    fetch("/api/configs/git_project_links")
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.value) {
+          const parsed = JSON.parse(data.value);
+          setProjectGitLinks(parsed);
+          saveGitProjectLinks(parsed);
+        }
+      })
+      .catch(e => console.warn("Lỗi tải cấu hình Git repo từ DB", e));
+
+    fetch("/api/configs/git_pat")
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.value) {
+          setGitPat(data.value);
+          localStorage.setItem(GIT_PAT_STORAGE_KEY, data.value);
+        }
+      })
+      .catch(e => console.warn("Lỗi tải Git PAT từ DB", e));
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -114,6 +145,19 @@ export default function Settings() {
     } else {
       localStorage.removeItem("gemini_api_key");
     }
+    if (gitPat.trim()) {
+      localStorage.setItem(GIT_PAT_STORAGE_KEY, gitPat.trim());
+    } else {
+      localStorage.removeItem(GIT_PAT_STORAGE_KEY);
+    }
+    const normalizedProjectGitLinks = Object.fromEntries(
+      Object.entries(projectGitLinks).map(([projectKey, links]) => [
+        projectKey,
+        links.map((link) => link.trim()).filter(Boolean),
+      ])
+    );
+    saveGitProjectLinks(normalizedProjectGitLinks);
+    setProjectGitLinks(normalizedProjectGitLinks);
     localStorage.setItem("jira_url", jiraUrl.trim() || JIRA_BASE_URL);
     saveSelectedProjectKeys(selectedProjectKeys);
     localStorage.setItem("default_project", nextDefaultProject);
@@ -149,6 +193,21 @@ export default function Settings() {
       console.warn("Failed to sync authorized team to backend", e);
     }
 
+    try {
+      await fetch("/api/configs/git_pat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: gitPat.trim() })
+      });
+      await fetch("/api/configs/git_project_links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: JSON.stringify(normalizedProjectGitLinks) })
+      });
+    } catch (e) {
+      console.warn("Failed to sync Git config to backend", e);
+    }
+
     addToast("success", "✅ Đã lưu cài đặt");
     setSaving(false);
   };
@@ -162,14 +221,40 @@ export default function Settings() {
     });
   };
 
+  const updateGitLink = (projectKey: string, index: number, value: string) => {
+    setProjectGitLinks((current) => {
+      const links = [...(current[projectKey] || [])];
+      links[index] = value;
+      return { ...current, [projectKey]: links };
+    });
+  };
+
+  const addGitLink = (projectKey: string) => {
+    setProjectGitLinks((current) => ({
+      ...current,
+      [projectKey]: [...(current[projectKey] || []), ""],
+    }));
+  };
+
+  const removeGitLink = (projectKey: string, index: number) => {
+    setProjectGitLinks((current) => {
+      const links = (current[projectKey] || []).filter((_, i) => i !== index);
+      return { ...current, [projectKey]: links };
+    });
+  };
+
   const handleClear = () => {
     localStorage.removeItem("jira_pat");
     localStorage.removeItem("jira_basic");
     localStorage.removeItem("jira_url");
     localStorage.removeItem("gemini_api_key");
+    localStorage.removeItem(GIT_PAT_STORAGE_KEY);
+    localStorage.removeItem(GIT_PROJECT_LINKS_STORAGE_KEY);
     setPat("");
     setJiraUrl(JIRA_BASE_URL);
     setGeminiKey("");
+    setGitPat("");
+    setProjectGitLinks({});
     setConnStatus(null);
     addToast("info", "🗑️ Đã xóa thông tin kết nối");
   };
@@ -403,6 +488,97 @@ export default function Settings() {
                   </ol>
                 </div>
               </details>
+            </div>
+
+            {/* Git Reconciliation Config */}
+            <div className="settings-section" style={{ marginBottom: 0 }}>
+              <div className="settings-section-title">🔍 Cấu hình đối soát Git</div>
+              <div className="settings-section-desc">
+                Khai báo Git Personal Access Token và các repo tương ứng với từng project Jira. Một project có thể gắn nhiều repo.
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="input-git-pat">
+                  Git Personal Access Token
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ marginLeft: 8, padding: "2px 6px", fontSize: 11 }}
+                    onClick={() => setShowGitPat((v) => !v)}
+                  >
+                    {showGitPat ? "🙈 Ẩn" : "👁️ Hiện"}
+                  </button>
+                </label>
+                <input
+                  id="input-git-pat"
+                  type={showGitPat ? "text" : "password"}
+                  value={gitPat}
+                  onChange={(e) => setGitPat(e.target.value)}
+                  placeholder="Nhập Git PAT dùng để đọc commit từ GitLab/GitHub/Bitbucket..."
+                  autoComplete="off"
+                />
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                  Token cần quyền đọc repository/commit. Với repo public có thể để trống, nhưng repo private cần PAT.
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {selectedProjects.map((project) => {
+                  const links = projectGitLinks[project.key] || [];
+                  return (
+                    <div
+                      key={project.key}
+                      style={{
+                        border: "1px solid var(--border)",
+                        borderRadius: 8,
+                        padding: 12,
+                        background: "rgba(255,255,255,0.02)",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, color: "var(--text-primary)" }}>{project.key}</div>
+                          <div style={{ fontSize: 12, color: "var(--text-muted)", overflowWrap: "anywhere" }}>{project.name}</div>
+                        </div>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => addGitLink(project.key)}>
+                          + Thêm repo
+                        </button>
+                      </div>
+
+                      {links.length === 0 && (
+                        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                          Chưa có repo Git cho project này.
+                        </div>
+                      )}
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {links.map((link, index) => (
+                          <div key={`${project.key}-${index}`} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <input
+                              type="url"
+                              value={link}
+                              onChange={(e) => updateGitLink(project.key, index, e.target.value)}
+                              placeholder="https://gitlab.example.com/group/repository.git"
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => removeGitLink(project.key, index)}
+                              style={{ color: "var(--accent-red)", flexShrink: 0 }}
+                            >
+                              Xóa
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 12 }}>
+                Chú ý: Nhớ bấm <strong style={{ color: "var(--text-primary)" }}>Lưu & Kết nối</strong> để đồng bộ cấu hình Git lên backend.
+              </div>
             </div>
 
             {/* Authorization Config (Only for namha@etc.vn) */}

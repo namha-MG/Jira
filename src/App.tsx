@@ -6,6 +6,7 @@ import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Issues from "./pages/Issues";
 import LogWork from "./pages/LogWork";
+import GitReconciliation from "./pages/GitReconciliation";
 import Settings from "./pages/Settings";
 import BulkCreate from "./pages/BulkCreate";
 import AutoSchedules from "./pages/AutoSchedules";
@@ -60,6 +61,7 @@ export default function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/issues" element={<Issues />} />
           <Route path="/logwork" element={<LogWork />} />
+          <Route path="/git-reconciliation" element={<GitReconciliation />} />
           <Route path="/bulkcreate" element={<BulkCreate />} />
           <Route path="/autoschedules" element={<AutoSchedules />} />
           <Route path="/teams" element={<Teams />} />
