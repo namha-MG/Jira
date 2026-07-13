@@ -13,6 +13,8 @@ export type GitReconciliationCommit = {
 };
 
 export type GitReconciliationRow = {
+  accountKey: string;
+  accountLabel: string;
   issueKey: string;
   projectKey: string;
   summary: string;
@@ -46,6 +48,14 @@ export type GitReconciliationResult = {
     missingCount: number;
     repoCount: number;
     commitCount: number;
+    accounts: {
+      accountKey: string;
+      accountLabel: string;
+      loggedTaskCount: number;
+      matchedCount: number;
+      missingCount: number;
+      commitCount: number;
+    }[];
   };
 };
 

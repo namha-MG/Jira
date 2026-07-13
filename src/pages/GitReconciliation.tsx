@@ -107,7 +107,7 @@ export default function GitReconciliation() {
         <div className="settings-section">
           <div className="settings-section-title">Bộ lọc đối soát</div>
           <div className="settings-section-desc">
-            Nguồn Jira là các worklog của bạn trong ngày được chọn. Nguồn Git là các repo đã cấu hình theo project trong Settings.
+            Nguồn Jira là worklog trong ngày của các tài khoản đã cấu hình. Nguồn Git là commit của từng tài khoản trên các repo theo project.
           </div>
 
           <div className="filter-bar" style={{ marginBottom: 0 }}>
@@ -195,13 +195,29 @@ export default function GitReconciliation() {
               </div>
             )}
 
+            {result.stats.accounts?.length > 0 && (
+              <div className="settings-section">
+                <div className="settings-section-title">Tổng hợp theo tài khoản</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+                  {result.stats.accounts.map((account) => (
+                    <div key={account.accountKey} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12, background: "rgba(255,255,255,0.02)" }}>
+                      <div style={{ fontWeight: 700, color: "var(--text-primary)", overflowWrap: "anywhere" }}>{account.accountLabel}</div>
+                      <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 6 }}>
+                        Task: {account.loggedTaskCount} · Đạt: {account.matchedCount} · Thiếu: {account.missingCount} · Commit: {account.commitCount}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {missingRows.length > 0 && (
               <div className="settings-section" style={{ borderColor: "rgba(239, 68, 68, 0.28)" }}>
                 <div className="settings-section-title">Task cần bổ sung commit</div>
                 <div className="settings-section-desc">Các task này đã có worklog trong ngày nhưng chưa tìm thấy commit khớp issue key hoặc nội dung.</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {missingRows.map((row) => (
-                    <span key={row.issueKey} className="badge badge-blocked">{row.issueKey}</span>
+                    <span key={`${row.accountKey}-${row.issueKey}`} className="badge badge-blocked">{row.accountLabel}: {row.issueKey}</span>
                   ))}
                 </div>
               </div>
@@ -215,6 +231,7 @@ export default function GitReconciliation() {
                   <thead>
                     <tr>
                       <th>Trạng thái</th>
+                      <th>Tài khoản</th>
                       <th>Task Jira</th>
                       <th>Worklog trong ngày</th>
                       <th>Commit khớp</th>
@@ -224,8 +241,9 @@ export default function GitReconciliation() {
                   </thead>
                   <tbody>
                     {rows.map((row) => (
-                      <tr key={row.issueKey}>
+                      <tr key={`${row.accountKey}-${row.issueKey}`}>
                         <td>{getStatusBadge(row)}</td>
+                        <td style={{ color: "var(--text-secondary)", fontWeight: 600, minWidth: 140 }}>{row.accountLabel}</td>
                         <td style={{ minWidth: 220 }}>
                           <div style={{ fontWeight: 700, color: "var(--accent-blue-light)" }}>{row.issueKey}</div>
                           <div style={{ color: "var(--text-secondary)", fontSize: 12, marginTop: 2 }}>{row.summary}</div>
@@ -280,7 +298,7 @@ export default function GitReconciliation() {
                     ))}
                     {rows.length === 0 && (
                       <tr>
-                        <td colSpan={6}>
+                        <td colSpan={7}>
                           <div className="empty-state" style={{ padding: 28 }}>
                             <div className="empty-state-title">Không có task đã log trong ngày này</div>
                             <p className="empty-state-text">Đổi ngày hoặc project rồi chạy lại đối soát.</p>

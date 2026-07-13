@@ -22,6 +22,8 @@ type TelegramReportStatus = {
 };
 
 type LoggedTask = {
+  accountKey: string;
+  accountLabel: string;
   issueKey: string;
   projectKey: string;
   summary: string;
@@ -39,12 +41,27 @@ type GitIdentity = {
   emails: string[];
 };
 
+type AccountTarget = {
+  key: string;
+  label: string;
+  identity: GitIdentity;
+};
+
 type GitReconciliationResultRow = LoggedTask & {
   status: "matched" | "missing";
   matchedCommit: GitCommit | null;
   matchScore: number;
   matchReason: string;
   repoCount: number;
+  commitCount: number;
+};
+
+type AccountStat = {
+  accountKey: string;
+  accountLabel: string;
+  loggedTaskCount: number;
+  matchedCount: number;
+  missingCount: number;
   commitCount: number;
 };
 
@@ -117,6 +134,27 @@ function sameJiraUser(a: any, b: any) {
   return left.some((value) => right.includes(value));
 }
 
+function jiraUserMatchesIdentity(user: any, identity: GitIdentity) {
+  return identityMatches(identity, {
+    ids: [user?.accountId, user?.name, user?.key],
+    names: [user?.displayName, user?.name, user?.key],
+    emails: [user?.emailAddress],
+  });
+}
+
+function currentJiraAccountTarget(currentUser: any): AccountTarget {
+  const key = normalizeIdentityValue(currentUser?.emailAddress || currentUser?.name || currentUser?.accountId || "__current__");
+  return {
+    key,
+    label: currentUser?.displayName || currentUser?.emailAddress || currentUser?.name || "Jira current user",
+    identity: {
+      ids: compactUnique([currentUser?.accountId, currentUser?.name, currentUser?.key]),
+      names: compactUnique([currentUser?.displayName, currentUser?.name, currentUser?.key]),
+      emails: compactUnique([currentUser?.emailAddress]),
+    },
+  };
+}
+
 async function getAllWorklogs(api: any, issueKey: string) {
   const all: any[] = [];
   let startAt = 0;
@@ -137,51 +175,78 @@ async function getAllWorklogs(api: any, issueKey: string) {
   return all;
 }
 
-async function getLoggedTasksForDate(jiraPat: string, date: string, projectKeys: string[]): Promise<LoggedTask[]> {
+async function getLoggedTasksForDate(jiraPat: string, date: string, projectKeys: string[], accountTargets: AccountTarget[]): Promise<LoggedTask[]> {
   const api = getJiraApi(jiraPat);
   api.defaults.httpsAgent = jiraHttpsAgent;
 
   const meRes = await api.get("/myself");
   const currentUser = meRes.data;
-  const clauses = [`worklogDate = "${date}"`, "worklogAuthor = currentUser()"];
+  const effectiveTargets = accountTargets.length > 0 && accountTargets[0].key !== "__current__"
+    ? accountTargets
+    : [currentJiraAccountTarget(currentUser)];
+
+  const clauses = [`worklogDate = "${date}"`];
   if (projectKeys.length > 0) {
     clauses.unshift(`project in (${projectKeys.map((key) => `"${key}"`).join(", ")})`);
   }
 
-  const res = await api.get("/search", {
-    params: {
-      jql: `${clauses.join(" AND ")} ORDER BY updated DESC`,
-      maxResults: 200,
-      fields: "summary,project",
-    },
-  });
+  const issues: any[] = [];
+  let startAt = 0;
+  const maxResults = 100;
 
-  const issues = res.data.issues || [];
-  const tasks: LoggedTask[] = [];
+  while (true) {
+    const res = await api.get("/search", {
+      params: {
+        jql: `${clauses.join(" AND ")} ORDER BY updated DESC`,
+        maxResults,
+        startAt,
+        fields: "summary,project",
+      },
+    });
+
+    const pageIssues = res.data.issues || [];
+    issues.push(...pageIssues);
+    const total = res.data.total ?? issues.length;
+    if (pageIssues.length === 0 || issues.length >= total) break;
+    startAt += maxResults;
+  }
+
+  const tasksByAccountAndIssue = new Map<string, LoggedTask>();
 
   for (const issue of issues) {
     const worklogs = await getAllWorklogs(api, issue.key);
-    const worklogsInDay = worklogs
-      .filter((worklog) => dateInBangkok(worklog.started) === date)
-      .filter((worklog) => sameJiraUser(worklog.author, currentUser))
-      .map((worklog) => ({
+
+    for (const worklog of worklogs) {
+      if (dateInBangkok(worklog.started) !== date) continue;
+
+      const matchedTarget = effectiveTargets.find((target) => jiraUserMatchesIdentity(worklog.author, target.identity));
+      if (!matchedTarget) continue;
+
+      const taskKey = `${matchedTarget.key}|${issue.key}`;
+      const existing = tasksByAccountAndIssue.get(taskKey);
+      const worklogRow = {
         id: String(worklog.id),
         comment: typeof worklog.comment === "string" ? worklog.comment : "",
         started: worklog.started,
         timeSpentSeconds: worklog.timeSpentSeconds || 0,
-      }));
+      };
 
-    if (worklogsInDay.length > 0) {
-      tasks.push({
-        issueKey: issue.key,
-        projectKey: issue.fields.project?.key || "",
-        summary: issue.fields.summary || "",
-        worklogs: worklogsInDay,
-      });
+      if (existing) {
+        existing.worklogs.push(worklogRow);
+      } else {
+        tasksByAccountAndIssue.set(taskKey, {
+          accountKey: matchedTarget.key,
+          accountLabel: matchedTarget.label,
+          issueKey: issue.key,
+          projectKey: issue.fields.project?.key || "",
+          summary: issue.fields.summary || "",
+          worklogs: [worklogRow],
+        });
+      }
     }
   }
 
-  return tasks;
+  return Array.from(tasksByAccountAndIssue.values());
 }
 
 function parseRepoUrl(repoUrl: string) {
@@ -223,12 +288,26 @@ function configuredAccountsToIdentity(accounts: string[] = []): GitIdentity {
   };
 }
 
-function mergeIdentities(...identities: GitIdentity[]) {
+function accountTargetFromValue(value: string): AccountTarget {
+  const normalized = normalizeIdentityValue(value);
   return {
-    ids: compactUnique(identities.flatMap((identity) => identity.ids)),
-    names: compactUnique(identities.flatMap((identity) => identity.names)),
-    emails: compactUnique(identities.flatMap((identity) => identity.emails)),
+    key: normalized,
+    label: value.trim(),
+    identity: configuredAccountsToIdentity([value]),
   };
+}
+
+function buildAccountTargets(accounts: string[] = []): AccountTarget[] {
+  const values = compactUnique(accounts.flatMap((account) => String(account).split(/[\n,;]+/)));
+  if (values.length === 0) {
+    return [{
+      key: "__current__",
+      label: "Git PAT hiện tại",
+      identity: { ids: [], names: [], emails: [] },
+    }];
+  }
+
+  return values.map(accountTargetFromValue);
 }
 
 function identityMatches(identity: GitIdentity, candidate: {
@@ -689,6 +768,71 @@ function formatTelegramReport(options: {
   return truncateTelegramText(lines.join("\n"));
 }
 
+function escapeTelegramHtml(value: string) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function formatTelegramReportV2(options: {
+  date: string;
+  rows: GitReconciliationResultRow[];
+  repoErrors: { projectKey: string; repoUrl: string; error: string }[];
+  stats: {
+    loggedTaskCount: number;
+    matchedCount: number;
+    missingCount: number;
+    repoCount: number;
+    commitCount: number;
+    accounts: AccountStat[];
+  };
+}) {
+  const lines = [
+    `📌 <b>Git/Jira Reconciliation</b>`,
+    `📅 <b>Date:</b> ${escapeTelegramHtml(options.date)}`,
+    `📊 <b>Total:</b> ${options.stats.loggedTaskCount} tasks | ✅ ${options.stats.matchedCount} matched | ❌ ${options.stats.missingCount} missing`,
+    `🔎 <b>Scope:</b> ${options.stats.repoCount} repos | ${options.stats.commitCount} user commits scanned`,
+    "",
+  ];
+
+  for (const account of options.stats.accounts) {
+    const accountRows = options.rows.filter((row) => row.accountKey === account.accountKey);
+    const missingRows = accountRows.filter((row) => row.status === "missing");
+    const matchedRows = accountRows.filter((row) => row.status === "matched");
+
+    lines.push(`👤 <b>${escapeTelegramHtml(account.accountLabel)}</b>`);
+    lines.push(`   Tasks: ${account.loggedTaskCount} | ✅ ${account.matchedCount} | ❌ ${account.missingCount} | Commits: ${account.commitCount}`);
+
+    if (account.loggedTaskCount === 0) {
+      lines.push(`   ⚪ Không có worklog Jira trong ngày.`);
+    }
+
+    for (const row of missingRows.slice(0, 8)) {
+      lines.push(`   ❌ <b>${escapeTelegramHtml(row.issueKey)}</b> [${escapeTelegramHtml(row.projectKey)}] ${escapeTelegramHtml(row.summary)}`);
+      lines.push(`      ${escapeTelegramHtml(row.matchReason)}`);
+    }
+
+    for (const row of matchedRows.slice(0, 8)) {
+      if (!row.matchedCommit) continue;
+      const message = row.matchedCommit.message.split(/\r?\n/)[0] || "";
+      lines.push(`   ✅ <b>${escapeTelegramHtml(row.issueKey)}</b> → <a href="${escapeTelegramHtml(row.matchedCommit.url)}">${escapeTelegramHtml(row.matchedCommit.shortSha)}</a> (${row.matchScore})`);
+      lines.push(`      ${escapeTelegramHtml(message)}`);
+    }
+
+    lines.push("");
+  }
+
+  if (options.repoErrors.length > 0) {
+    lines.push(`⚠️ <b>Repo errors</b>`);
+    for (const error of options.repoErrors.slice(0, 10)) {
+      lines.push(`- ${escapeTelegramHtml(error.projectKey)}: ${escapeTelegramHtml(error.repoUrl)} - ${escapeTelegramHtml(error.error)}`);
+    }
+  }
+
+  return truncateTelegramText(lines.join("\n"));
+}
+
 async function sendTelegramReport(botToken: string, chatId: string, text: string): Promise<TelegramReportStatus> {
   if (!botToken.trim() || !chatId.trim()) {
     return { sent: false, error: "Chưa cấu hình Telegram bot token/chat id" };
@@ -698,6 +842,7 @@ async function sendTelegramReport(botToken: string, chatId: string, text: string
     await axios.post(`https://api.telegram.org/bot${botToken.trim()}/sendMessage`, {
       chat_id: chatId.trim(),
       text,
+      parse_mode: "HTML",
       disable_web_page_preview: true,
     });
     return { sent: true };
@@ -722,28 +867,32 @@ export async function runGitReconciliation(options: {
 }) {
   const projectGitLinks = parseJsonConfig<ProjectGitLinks>(options.projectGitLinks, {});
   const gitAccounts = compactUnique(options.gitAccounts || []);
-  const configuredIdentity = configuredAccountsToIdentity(gitAccounts);
+  const accountTargets = buildAccountTargets(gitAccounts);
   const since = startOfDayIso(options.date);
   const until = endOfDayIso(options.date);
-  const loggedTasks = await getLoggedTasksForDate(options.jiraPat, options.date, options.projectKeys);
+  const loggedTasks = await getLoggedTasksForDate(options.jiraPat, options.date, options.projectKeys, accountTargets);
 
   const repoErrors: { projectKey: string; repoUrl: string; error: string }[] = [];
-  const commitsByProject: Record<string, GitCommit[]> = {};
+  const commitsByAccountAndProject: Record<string, Record<string, GitCommit[]>> = {};
 
-  for (const projectKey of options.projectKeys) {
-    const repoUrls = projectGitLinks[projectKey] || [];
-    commitsByProject[projectKey] = [];
+  for (const account of accountTargets) {
+    commitsByAccountAndProject[account.key] = {};
 
-    for (const repoUrl of repoUrls.filter((url) => url.trim())) {
-      try {
-        const commits = await fetchRepoCommits(repoUrl, options.gitPat, since, until, configuredIdentity);
-        commitsByProject[projectKey].push(...commits);
-      } catch (err: any) {
-        repoErrors.push({
+    for (const projectKey of options.projectKeys) {
+      const repoUrls = projectGitLinks[projectKey] || [];
+      commitsByAccountAndProject[account.key][projectKey] = [];
+
+      for (const repoUrl of repoUrls.filter((url) => url.trim())) {
+        try {
+          const commits = await fetchRepoCommits(repoUrl, options.gitPat, since, until, account.identity);
+          commitsByAccountAndProject[account.key][projectKey].push(...commits);
+        } catch (err: any) {
+          repoErrors.push({
           projectKey,
           repoUrl,
           error: err?.response?.data?.message || err?.message || "Không tải được commit",
-        });
+          });
+        }
       }
     }
   }
@@ -751,7 +900,7 @@ export async function runGitReconciliation(options: {
   const results: GitReconciliationResultRow[] = [];
   for (const task of loggedTasks) {
     const configuredRepos = projectGitLinks[task.projectKey] || [];
-    const projectCommits = commitsByProject[task.projectKey] || [];
+    const projectCommits = commitsByAccountAndProject[task.accountKey]?.[task.projectKey] || [];
     const match = configuredRepos.length > 0 ? await matchCommit(task, projectCommits, options.geminiKey) : null;
 
     results.push({
@@ -766,19 +915,36 @@ export async function runGitReconciliation(options: {
   }
 
   const matchedCount = results.filter((row) => row.status === "matched").length;
+  const accountStats: AccountStat[] = accountTargets.map((account) => {
+    const accountRows = results.filter((row) => row.accountKey === account.key);
+    const accountCommitCount = Object.values(commitsByAccountAndProject[account.key] || {})
+      .reduce((sum, commits) => sum + commits.length, 0);
+
+    return {
+      accountKey: account.key,
+      accountLabel: account.label,
+      loggedTaskCount: accountRows.length,
+      matchedCount: accountRows.filter((row) => row.status === "matched").length,
+      missingCount: accountRows.filter((row) => row.status === "missing").length,
+      commitCount: accountCommitCount,
+    };
+  });
   const stats = {
     loggedTaskCount: results.length,
     matchedCount,
     missingCount: results.length - matchedCount,
     repoCount: Object.values(projectGitLinks).reduce((sum, repos) => sum + repos.length, 0),
-    commitCount: Object.values(commitsByProject).reduce((sum, commits) => sum + commits.length, 0),
+    commitCount: Object.values(commitsByAccountAndProject).reduce(
+      (sum, projectMap) => sum + Object.values(projectMap).reduce((innerSum, commits) => innerSum + commits.length, 0),
+      0
+    ),
+    accounts: accountStats,
   };
   const telegramReport = await sendTelegramReport(
     options.telegramBotToken || "",
     options.telegramChatId || "",
-    formatTelegramReport({
+    formatTelegramReportV2({
       date: options.date,
-      gitAccounts,
       rows: results,
       repoErrors,
       stats,
