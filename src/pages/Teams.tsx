@@ -16,9 +16,12 @@ import {
   moveIssuesToSprint,
   getIssuesInSprint,
   deleteWorklog,
+  deleteIssue,
   assignIssue,
   getWorklogs,
-  getCurrentUser
+  getCurrentUser,
+  getTransitions,
+  transitionIssue
 } from "../jiraService";
 import { getDefaultProjectKey, getSelectedJiraProjects } from "../config";
 import { copyToClipboard } from "../utils";
@@ -67,6 +70,8 @@ const STATUS_OPTIONS = [
   { value: "Done", label: "Done" },
   { value: "Closed", label: "Closed" },
 ];
+
+type SprintIssueTypeFilter = "all" | "task" | "sub-task" | "story";
 
 function getBadgeClass(status: string): string {
   if (status === "In Progress") return "badge badge-inprogress";
@@ -160,6 +165,15 @@ export default function Teams() {
   const [sprintTasks, setSprintTasks] = useState<JiraIssue[]>([]);
   const [sprintTasksLoading, setSprintTasksLoading] = useState(false);
   const [showClosedSprints, setShowClosedSprints] = useState(false);
+  const [sprintIssueTypeFilter, setSprintIssueTypeFilter] = useState<SprintIssueTypeFilter>("all");
+  const [sprintOnlyUnassigned, setSprintOnlyUnassigned] = useState(false);
+  const [selectedSprintIssueKeys, setSelectedSprintIssueKeys] = useState<string[]>([]);
+  const [deletingSprintIssues, setDeletingSprintIssues] = useState(false);
+  const [sprintTransitionModalOpen, setSprintTransitionModalOpen] = useState(false);
+  const [sprintTransitionLoading, setSprintTransitionLoading] = useState(false);
+  const [sprintTransitionSubmitting, setSprintTransitionSubmitting] = useState(false);
+  const [sprintTransitionOptions, setSprintTransitionOptions] = useState<{ id: string; name: string; to: { name: string } }[]>([]);
+  const [selectedSprintTransitionId, setSelectedSprintTransitionId] = useState("");
 
   useEffect(() => {
     if (activeTab === "sprints" && sprintProjectKey) {
@@ -189,6 +203,105 @@ export default function Teams() {
   const [startSprintModalOpen, setStartSprintModalOpen] = useState<JiraSprint | null>(null);
   const [startSprintForm, setStartSprintForm] = useState({ name: "", startDate: "", endDate: "", goal: "" });
   const [startSprintLoading, setStartSprintLoading] = useState(false);
+
+  const loadSprintTasks = useCallback(async (sprintId: number) => {
+    setSprintTasksLoading(true);
+    try {
+      const data = await getIssuesInSprint(sprintId);
+      setSprintTasks(data.issues);
+      setSelectedSprintIssueKeys([]);
+    } catch (err) {
+      console.error(err);
+      alert("Lỗi tải danh sách task");
+    } finally {
+      setSprintTasksLoading(false);
+    }
+  }, []);
+
+  const selectedSprintIssues = useMemo(() => {
+    const selected = new Set(selectedSprintIssueKeys);
+    return sprintTasks.filter(issue => selected.has(issue.key));
+  }, [selectedSprintIssueKeys, sprintTasks]);
+
+  const handleDeleteSprintIssues = async () => {
+    if (selectedSprintIssues.length === 0) return;
+    if (!window.confirm(`Xóa ${selectedSprintIssues.length} task đã chọn khỏi Jira? Task cha sẽ xóa kèm sub-task.`)) return;
+
+    const selectedKeys = new Set(selectedSprintIssueKeys);
+    const issuesToDelete = selectedSprintIssues.filter(issue => {
+      const parentKey = issue.fields.parent?.key;
+      return !parentKey || !selectedKeys.has(parentKey);
+    });
+
+    setDeletingSprintIssues(true);
+    const errors: string[] = [];
+    for (const issue of issuesToDelete) {
+      try {
+        await deleteIssue(issue.key, true);
+      } catch (err: any) {
+        errors.push(`${issue.key}: ${err.response?.data?.errorMessages?.[0] || err.message || "Không rõ lỗi"}`);
+      }
+    }
+
+    setDeletingSprintIssues(false);
+    if (expandedSprintId) {
+      await loadSprintTasks(expandedSprintId);
+    }
+    if (errors.length > 0) {
+      alert(`Đã xóa một phần, ${errors.length} task lỗi:\n${errors.join("\n")}`);
+    }
+  };
+
+  const openSprintTransitionModal = async () => {
+    if (selectedSprintIssues.length === 0) return;
+    setSprintTransitionModalOpen(true);
+    setSprintTransitionLoading(true);
+    setSprintTransitionOptions([]);
+    setSelectedSprintTransitionId("");
+    try {
+      const transitions = await getTransitions(selectedSprintIssues[0].key);
+      setSprintTransitionOptions(transitions);
+    } catch (err: any) {
+      alert("Lỗi tải trạng thái có thể chuyển: " + (err.response?.data?.errorMessages?.[0] || err.message || ""));
+      setSprintTransitionModalOpen(false);
+    } finally {
+      setSprintTransitionLoading(false);
+    }
+  };
+
+  const handleSprintTransitionSubmit = async () => {
+    const selectedTransition = sprintTransitionOptions.find(t => t.id === selectedSprintTransitionId);
+    if (!selectedTransition || selectedSprintIssues.length === 0) return;
+
+    setSprintTransitionSubmitting(true);
+    const errors: string[] = [];
+    for (const issue of selectedSprintIssues) {
+      try {
+        const transitions = await getTransitions(issue.key);
+        const matchingTransition = transitions.find(t =>
+          t.id === selectedTransition.id ||
+          (t.name === selectedTransition.name && t.to.name === selectedTransition.to.name)
+        );
+        if (!matchingTransition) {
+          errors.push(`${issue.key}: Không có transition "${selectedTransition.name} -> ${selectedTransition.to.name}"`);
+          continue;
+        }
+        await transitionIssue(issue.key, matchingTransition.id);
+      } catch (err: any) {
+        errors.push(`${issue.key}: ${err.response?.data?.errorMessages?.[0] || err.message || "Không rõ lỗi"}`);
+      }
+    }
+
+    setSprintTransitionSubmitting(false);
+    setSprintTransitionModalOpen(false);
+    setSelectedSprintIssueKeys([]);
+    if (expandedSprintId) {
+      await loadSprintTasks(expandedSprintId);
+    }
+    if (errors.length > 0) {
+      alert(`Đã chuyển trạng thái một phần, ${errors.length} task lỗi:\n${errors.join("\n")}`);
+    }
+  };
 
   // ── Tab 5: Statistics ─────────────────────────────────────────────────────
   const [statTeamId, setStatTeamId] = useState<number | null>(null);
@@ -786,12 +899,39 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
     });
   }, [sprintsList, showClosedSprints]);
 
+  const filteredSprintTasks = useMemo(() => {
+    return sprintTasks.filter(issue => {
+      const issueTypeName = (issue.fields.issuetype?.name || "").toLowerCase();
+      const matchesType =
+        sprintIssueTypeFilter === "all" ||
+        (sprintIssueTypeFilter === "task" && issueTypeName === "task") ||
+        (sprintIssueTypeFilter === "story" && issueTypeName === "story") ||
+        (sprintIssueTypeFilter === "sub-task" && (
+          issueTypeName === "sub-task" ||
+          issueTypeName === "sub task" ||
+          issueTypeName === "subtask"
+        ));
+      const matchesAssignee = !sprintOnlyUnassigned || !issue.fields.assignee;
+      return matchesType && matchesAssignee;
+    });
+  }, [sprintIssueTypeFilter, sprintOnlyUnassigned, sprintTasks]);
+
+  const visibleSprintIssueKeys = useMemo(
+    () => filteredSprintTasks.map(issue => issue.key),
+    [filteredSprintTasks]
+  );
+
+  useEffect(() => {
+    const visibleKeys = new Set(visibleSprintIssueKeys);
+    setSelectedSprintIssueKeys(prev => prev.filter(key => visibleKeys.has(key)));
+  }, [visibleSprintIssueKeys]);
+
   const { rootTasks, subTasksMap } = useMemo(() => {
     const roots: JiraIssue[] = [];
     const map: Record<string, JiraIssue[]> = {};
-    const allKeys = new Set(sprintTasks.map(t => t.key));
+    const allKeys = new Set(filteredSprintTasks.map(t => t.key));
 
-    sprintTasks.forEach(issue => {
+    filteredSprintTasks.forEach(issue => {
       const parentKey = issue.fields.parent?.key;
       if (parentKey && allKeys.has(parentKey)) {
         if (!map[parentKey]) map[parentKey] = [];
@@ -801,7 +941,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       }
     });
     return { rootTasks: roots, subTasksMap: map };
-  }, [sprintTasks]);
+  }, [filteredSprintTasks]);
 
   // ─── Render helpers ────────────────────────────────────────────────────────
 
@@ -810,9 +950,23 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
     const endDate = issue.fields.customfield_10302 || issue.fields.duedate;
     const startStr = startDate ? new Date(startDate).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "";
     const endStr = endDate ? new Date(endDate).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "";
+    const isSelected = selectedSprintIssueKeys.includes(issue.key);
     
     return (
       <tr key={issue.key} style={{ borderBottom: "1px solid var(--border)", background: isSubtask ? "rgba(0,0,0,0.02)" : "transparent" }}>
+        <td style={{ padding: "8px", width: 40, textAlign: "center" }}>
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={(e) => {
+              setSelectedSprintIssueKeys(prev =>
+                e.target.checked
+                  ? Array.from(new Set([...prev, issue.key]))
+                  : prev.filter(key => key !== issue.key)
+              );
+            }}
+          />
+        </td>
         <td style={{ padding: "8px", paddingLeft: isSubtask ? 32 : 8, width: 140 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {isSubtask && <span style={{ color: "var(--border)", fontSize: 16 }}>↳</span>}
@@ -1960,6 +2114,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                           onClick={async () => {
                             if (isExpanded) {
                               setExpandedSprintId(null);
+                              setSelectedSprintIssueKeys([]);
                             } else {
                               setExpandedSprintId(sprint.id);
                               setSprintTasksLoading(true);
@@ -1982,6 +2137,61 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
 
                     {isExpanded && (
                       <div style={{ marginTop: 16, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
+                        {!sprintTasksLoading && sprintTasks.length > 0 && (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 12 }}>
+                            <div className="form-group" style={{ margin: 0, minWidth: 180 }}>
+                              <label>Loại issue</label>
+                              <select
+                                value={sprintIssueTypeFilter}
+                                onChange={(e) => setSprintIssueTypeFilter(e.target.value as SprintIssueTypeFilter)}
+                              >
+                                <option value="all">Tất cả</option>
+                                <option value="task">Task</option>
+                                <option value="sub-task">Sub-task</option>
+                                <option value="story">Story</option>
+                              </select>
+                            </div>
+                            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", marginTop: 18 }}>
+                              <input
+                                type="checkbox"
+                                checked={sprintOnlyUnassigned}
+                                onChange={(e) => setSprintOnlyUnassigned(e.target.checked)}
+                              />
+                              Chỉ task chưa assign
+                            </label>
+                            <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", marginTop: 18 }}>
+                              {selectedSprintIssueKeys.length > 0 && (
+                                <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+                                  Đã chọn {selectedSprintIssueKeys.length}
+                                </span>
+                              )}
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={openSprintTransitionModal}
+                                disabled={selectedSprintIssueKeys.length === 0 || deletingSprintIssues}
+                              >
+                                Chuyển trạng thái
+                              </button>
+                              <button
+                                className="btn btn-danger btn-sm"
+                                onClick={handleDeleteSprintIssues}
+                                disabled={selectedSprintIssueKeys.length === 0 || deletingSprintIssues}
+                                style={{ background: "#ef4444", color: "white", border: "none" }}
+                              >
+                                {deletingSprintIssues ? "Đang xóa..." : "Xóa task"}
+                              </button>
+                              {selectedSprintIssueKeys.length > 0 && (
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => setSelectedSprintIssueKeys([])}
+                                  disabled={deletingSprintIssues}
+                                >
+                                  Bỏ chọn
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
                         {sprintTasksLoading ? (
                           <div style={{ opacity: 0.5 }}>Đang tải...</div>
                         ) : sprintTasks.length === 0 ? (
@@ -1991,6 +2201,15 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                               <thead>
                                 <tr style={{ borderBottom: "1px solid var(--border)", color: "var(--text-secondary)", fontSize: 12 }}>
+                                  <th style={{ padding: "4px 8px", textAlign: "center", width: 40 }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={visibleSprintIssueKeys.length > 0 && visibleSprintIssueKeys.every(key => selectedSprintIssueKeys.includes(key))}
+                                      onChange={(e) => {
+                                        setSelectedSprintIssueKeys(e.target.checked ? visibleSprintIssueKeys : []);
+                                      }}
+                                    />
+                                  </th>
                                   <th style={{ padding: "4px 8px", textAlign: "left", width: 140 }}>Key</th>
                                   <th style={{ padding: "4px 8px", textAlign: "left" }}>Tiêu đề</th>
                                   <th style={{ padding: "4px 8px", textAlign: "left", width: 140 }}>Trạng thái</th>
@@ -2019,6 +2238,50 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       </div>
 
       {/* ─── MODALS ───────────────────────────────────────────────────────────── */}
+
+      {/* Sprint Transition Modal */}
+      {sprintTransitionModalOpen && (
+        <div className="modal-overlay" onClick={() => !sprintTransitionSubmitting && setSprintTransitionModalOpen(false)}>
+          <div className="modal" style={{ maxWidth: 450 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Chuyển trạng thái {selectedSprintIssues.length} task</div>
+              <button className="modal-close" onClick={() => !sprintTransitionSubmitting && setSprintTransitionModalOpen(false)}>✕</button>
+            </div>
+            <div className="form-group">
+              <label>Trạng thái mới</label>
+              {sprintTransitionLoading ? (
+                <div style={{ padding: 8, color: "var(--text-muted)", fontSize: 13 }}>Đang tải danh sách trạng thái...</div>
+              ) : sprintTransitionOptions.length === 0 ? (
+                <div style={{ padding: 8, color: "var(--accent-red)", fontSize: 13 }}>Không có trạng thái nào có thể chuyển.</div>
+              ) : (
+                <select
+                  value={selectedSprintTransitionId}
+                  onChange={e => setSelectedSprintTransitionId(e.target.value)}
+                  disabled={sprintTransitionSubmitting}
+                >
+                  <option value="">-- Chọn trạng thái --</option>
+                  {sprintTransitionOptions.map(t => (
+                    <option key={t.id} value={t.id}>{t.name} → {t.to.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+              Hệ thống sẽ áp dụng transition tương ứng cho từng task. Task nào không có transition này sẽ được báo lỗi.
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setSprintTransitionModalOpen(false)} disabled={sprintTransitionSubmitting}>Hủy</button>
+              <button
+                className="btn btn-primary"
+                onClick={handleSprintTransitionSubmit}
+                disabled={!selectedSprintTransitionId || sprintTransitionLoading || sprintTransitionSubmitting}
+              >
+                {sprintTransitionSubmitting ? "Đang xử lý..." : "Xác nhận"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Assign Sprint Modal */}
       {assignSprintModalOpen && (

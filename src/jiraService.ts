@@ -905,6 +905,13 @@ export async function updateIssue(issueKey: string, payload: any): Promise<any> 
   return res.data;
 }
 
+/** Xoa issue khoi Jira. Mac dinh xoa kem sub-task neu issue cha co sub-task. */
+export async function deleteIssue(issueKey: string, deleteSubtasks: boolean = true): Promise<void> {
+  await jiraApi.delete(`/issue/${issueKey}`, {
+    params: { deleteSubtasks },
+  });
+}
+
 // ===============================================
 // AGILE & GREENHOPPER API FUNCTIONS
 // ===============================================
