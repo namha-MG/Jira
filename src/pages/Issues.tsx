@@ -5,6 +5,7 @@ import {
 import { getDefaultProjectKey, getSelectedJiraProjects } from "../config";
 import NotificationBell from "../components/NotificationBell";
 import UserSelect from "../components/UserSelect";
+import { JiraImage } from "../components/JiraImage";
 import { jobStore } from "../stores/jobStore";
 
 function normalizeText(str?: string) {
@@ -978,7 +979,7 @@ export default function Issues() {
                       <td data-label="Người xử lý">
                         {issue.fields.assignee ? (
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <img
+                            <JiraImage
                               src={issue.fields.assignee.avatarUrls["48x48"]}
                               alt={issue.fields.assignee.displayName}
                               style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid var(--border)" }}
@@ -1226,7 +1227,7 @@ export default function Issues() {
                       const isImage = att.mimeType && att.mimeType.startsWith("image/");
                       return isImage ? (
                         <a key={att.id} href={att.content} target="_blank" rel="noreferrer" style={{ display: "block", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
-                          <img src={att.thumbnail || att.content} alt={att.filename} style={{ height: 80, objectFit: "cover", display: "block" }} title={att.filename} />
+                          <JiraImage src={att.thumbnail || att.content} alt={att.filename} style={{ height: 80, objectFit: "cover", display: "block" }} title={att.filename} />
                         </a>
                       ) : (
                         <a key={att.id} href={att.content} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{ padding: "4px 8px", border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--text-primary)", fontSize: 11 }}>
@@ -1351,7 +1352,7 @@ export default function Issues() {
                       <div key={`${item.type}-${item.id}`} style={{ padding: "12px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-card)" }}>
                         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
                           {item.author?.avatarUrls?.["48x48"] ? (
-                            <img src={item.author.avatarUrls["48x48"]} alt="" style={{ width: 24, height: 24, borderRadius: "50%" }} />
+                            <JiraImage src={item.author.avatarUrls["48x48"]} alt="" style={{ width: 24, height: 24, borderRadius: "50%" }} />
                           ) : (
                             <div style={{ width: 24, height: 24, borderRadius: "50%", background: "var(--border)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>
                               {(item.author?.displayName || item.author?.name || "?").charAt(0)}

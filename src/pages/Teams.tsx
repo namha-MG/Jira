@@ -25,6 +25,7 @@ import {
 } from "../jiraService";
 import { getDefaultProjectKey, getSelectedJiraProjects } from "../config";
 import { copyToClipboard } from "../utils";
+import { JiraImage } from "../components/JiraImage";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,7 +72,13 @@ const STATUS_OPTIONS = [
   { value: "Closed", label: "Closed" },
 ];
 
-type SprintIssueTypeFilter = "all" | "task" | "sub-task" | "story";
+type SprintIssueTypeFilter = "task" | "sub-task" | "story";
+
+const SPRINT_ISSUE_TYPE_OPTIONS: { value: SprintIssueTypeFilter; label: string }[] = [
+  { value: "task", label: "Task" },
+  { value: "sub-task", label: "Sub-task" },
+  { value: "story", label: "Story" },
+];
 
 function getBadgeClass(status: string): string {
   if (status === "In Progress") return "badge badge-inprogress";
@@ -165,7 +172,7 @@ export default function Teams() {
   const [sprintTasks, setSprintTasks] = useState<JiraIssue[]>([]);
   const [sprintTasksLoading, setSprintTasksLoading] = useState(false);
   const [showClosedSprints, setShowClosedSprints] = useState(false);
-  const [sprintIssueTypeFilter, setSprintIssueTypeFilter] = useState<SprintIssueTypeFilter>("all");
+  const [sprintIssueTypeFilters, setSprintIssueTypeFilters] = useState<SprintIssueTypeFilter[]>(["task"]);
   const [sprintOnlyUnassigned, setSprintOnlyUnassigned] = useState(false);
   const [selectedSprintIssueKeys, setSelectedSprintIssueKeys] = useState<string[]>([]);
   const [deletingSprintIssues, setDeletingSprintIssues] = useState(false);
@@ -903,10 +910,9 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
     return sprintTasks.filter(issue => {
       const issueTypeName = (issue.fields.issuetype?.name || "").toLowerCase();
       const matchesType =
-        sprintIssueTypeFilter === "all" ||
-        (sprintIssueTypeFilter === "task" && issueTypeName === "task") ||
-        (sprintIssueTypeFilter === "story" && issueTypeName === "story") ||
-        (sprintIssueTypeFilter === "sub-task" && (
+        (sprintIssueTypeFilters.includes("task") && issueTypeName === "task") ||
+        (sprintIssueTypeFilters.includes("story") && issueTypeName === "story") ||
+        (sprintIssueTypeFilters.includes("sub-task") && (
           issueTypeName === "sub-task" ||
           issueTypeName === "sub task" ||
           issueTypeName === "subtask"
@@ -914,7 +920,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
       const matchesAssignee = !sprintOnlyUnassigned || !issue.fields.assignee;
       return matchesType && matchesAssignee;
     });
-  }, [sprintIssueTypeFilter, sprintOnlyUnassigned, sprintTasks]);
+  }, [sprintIssueTypeFilters, sprintOnlyUnassigned, sprintTasks]);
 
   const visibleSprintIssueKeys = useMemo(
     () => filteredSprintTasks.map(issue => issue.key),
@@ -977,7 +983,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
         </td>
         <td style={{ padding: "8px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {issue.fields.issuetype?.iconUrl && <img src={issue.fields.issuetype.iconUrl} alt="type" style={{ width: 16, height: 16, borderRadius: 2 }} />}
+            {issue.fields.issuetype?.iconUrl && <JiraImage src={issue.fields.issuetype.iconUrl} alt="type" style={{ width: 16, height: 16, borderRadius: 2 }} />}
             <span style={{ fontSize: 13 }}>{issue.fields.summary}</span>
           </div>
         </td>
@@ -2139,17 +2145,29 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                       <div style={{ marginTop: 16, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
                         {!sprintTasksLoading && sprintTasks.length > 0 && (
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 12 }}>
-                            <div className="form-group" style={{ margin: 0, minWidth: 180 }}>
+                            <div className="form-group" style={{ margin: 0 }}>
                               <label>Loại issue</label>
-                              <select
-                                value={sprintIssueTypeFilter}
-                                onChange={(e) => setSprintIssueTypeFilter(e.target.value as SprintIssueTypeFilter)}
-                              >
-                                <option value="all">Tất cả</option>
-                                <option value="task">Task</option>
-                                <option value="sub-task">Sub-task</option>
-                                <option value="story">Story</option>
-                              </select>
+                              <div style={{ display: "flex", alignItems: "center", gap: 12, minHeight: 36 }}>
+                                {SPRINT_ISSUE_TYPE_OPTIONS.map(option => (
+                                  <label
+                                    key={option.value}
+                                    style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, cursor: "pointer" }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={sprintIssueTypeFilters.includes(option.value)}
+                                      onChange={(e) => {
+                                        setSprintIssueTypeFilters(current =>
+                                          e.target.checked
+                                            ? [...current, option.value]
+                                            : current.filter(value => value !== option.value)
+                                        );
+                                      }}
+                                    />
+                                    {option.label}
+                                  </label>
+                                ))}
+                              </div>
                             </div>
                             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", marginTop: 18 }}>
                               <input
@@ -2196,6 +2214,8 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                           <div style={{ opacity: 0.5 }}>Đang tải...</div>
                         ) : sprintTasks.length === 0 ? (
                           <div style={{ opacity: 0.5, fontStyle: "italic" }}>Không có task nào trong Sprint này.</div>
+                        ) : filteredSprintTasks.length === 0 ? (
+                          <div style={{ opacity: 0.5, fontStyle: "italic" }}>Không có task nào khớp bộ lọc.</div>
                         ) : (
                           <div style={{ maxHeight: 350, overflowY: "auto", paddingRight: 8 }}>
                             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>

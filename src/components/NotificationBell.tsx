@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { getRecentNotificationsForUser, JiraNotification } from "../jiraService";
+import { JiraImage } from "./JiraImage";
 
 export default function NotificationBell() {
   const [notifications, setNotifications] = useState<JiraNotification[]>([]);
@@ -141,7 +142,7 @@ export default function NotificationBell() {
                     onClick={() => markAsReadAndGo(n.id, n.issueKey)}
                   >
                     {n.authorAvatar ? (
-                      <img src={n.authorAvatar} alt="" style={{ width: 32, height: 32, borderRadius: "50%" }} />
+                      <JiraImage src={n.authorAvatar} alt="" style={{ width: 32, height: 32, borderRadius: "50%" }} />
                     ) : (
                       <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--border)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>
                         {n.authorName.charAt(0)}

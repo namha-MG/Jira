@@ -3,6 +3,7 @@ import { getAllIssuesByJql, JiraIssue, getAssignableUsers, updateIssue, getWorkl
 import { getDefaultProjectKey, getSelectedJiraProjects } from "../config";
 import NotificationBell from "../components/NotificationBell";
 import UserSelect from "../components/UserSelect";
+import { JiraImage } from "../components/JiraImage";
 
 function getBadgeClass(statusName: string = "") {
   const s = statusName.toLowerCase();
@@ -301,7 +302,7 @@ export default function UnassignedIssues() {
                       <td data-label="Type">
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                           {issue.fields.issuetype?.iconUrl && (
-                            <img src={issue.fields.issuetype.iconUrl} alt="type" style={{ width: 14, height: 14, borderRadius: 2 }} />
+                            <JiraImage src={issue.fields.issuetype.iconUrl} alt="type" style={{ width: 14, height: 14, borderRadius: 2 }} />
                           )}
                           <span style={{ fontSize: 12 }}>{issue.fields.issuetype?.name}</span>
                         </div>
