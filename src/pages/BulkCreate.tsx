@@ -17,6 +17,16 @@ export interface ManualTaskRow {
   autoLogWork: boolean;
 }
 
+type ImportAssigneeRole = "" | "BA" | "Tester" | "DEV";
+
+const getTaskRole = (summary: string): Exclude<ImportAssigneeRole, ""> | null => {
+  const normalized = summary.trim().toLowerCase();
+  if (normalized.startsWith("[ba]")) return "BA";
+  if (normalized.startsWith("[tester]")) return "Tester";
+  if (normalized.startsWith("[dev]")) return "DEV";
+  return null;
+};
+
 const parseExcelDate = (val: any): Date | null => {
   if (!val) return null;
   if (val instanceof Date && !isNaN(val.getTime())) return val;
@@ -106,6 +116,7 @@ export default function BulkCreate() {
   const [loadingTasks, setLoadingTasks] = useState(false);
 
   const [excelData, setExcelData] = useState<any[]>([]);
+  const [importAssigneeRole, setImportAssigneeRole] = useState<ImportAssigneeRole>("");
 
   const isConfigured = !!localStorage.getItem("jira_pat") || !!localStorage.getItem("jira_basic");
 
@@ -254,6 +265,10 @@ export default function BulkCreate() {
         const startD = row["Custom field (Start Date (Time))"];
         const endD = row["Custom field (Due Date (Time))"];
         const origEstimate = row["Original Estimate"];
+        const parentRole = getTaskRole(summary);
+        const parentAssignee = parentRole === null || parentRole === importAssigneeRole
+          ? String(row["Assignee"] || "")
+          : "";
 
         const customFields: any = {};
         let formattedStartD = "";
@@ -274,7 +289,7 @@ export default function BulkCreate() {
           projectKey: selectedProject,
           summary: summary,
           issueTypeName: issueType,
-          assigneeName: row["Assignee"] !== undefined ? row["Assignee"] : "",
+          assigneeName: parentAssignee,
           originalEstimate: origEstimate,
           customFields
         });
@@ -284,7 +299,7 @@ export default function BulkCreate() {
             key: created.key,
             summary,
             issueType,
-            assigneeName: row["Assignee"] !== undefined ? String(row["Assignee"] || "") : "",
+            assigneeName: parentAssignee,
             estimate: origEstimate,
             startDate: formattedStartD,
             endDate: formattedEndD,
@@ -366,6 +381,11 @@ export default function BulkCreate() {
           for (let sIdx = 0; sIdx < subtasksToCreate.length; sIdx++) {
              const sub = subtasksToCreate[sIdx];
              const targetIndex = logIndex + 1 + sIdx;
+             const subRole = getTaskRole(sub.title);
+             const roleCanBeAssigned = subRole !== null && subRole === importAssigneeRole;
+             const subAssignee = roleCanBeAssigned && row["Assignee"] !== undefined
+               ? String(row["Assignee"] || "")
+               : "";
              
              setLogs(prev => prev.map((l, idx) => idx === targetIndex ? { ...l, status: "processing" } : l));
              
@@ -386,7 +406,7 @@ export default function BulkCreate() {
                   parentKey: parentKey,
                   projectKey: selectedProject,
                   summary: sub.title,
-                  assigneeName: row["Assignee"] !== undefined ? row["Assignee"] : "",
+                  assigneeName: subAssignee,
                   originalEstimate: sub.est,
                   customFields: Object.keys(subCustomFields).length > 0 ? subCustomFields : undefined
                 });
@@ -396,7 +416,7 @@ export default function BulkCreate() {
                     key: sCreated.key,
                     summary: sub.title,
                     issueType: "Sub-task",
-                    assigneeName: row["Assignee"] !== undefined ? String(row["Assignee"] || "") : "",
+                    assigneeName: subAssignee,
                     estimate: sub.est,
                     startDate: formattedStartD,
                     endDate: subEndDateForAutoResolve,
@@ -941,6 +961,22 @@ Trả về kết quả DƯỚI DẠNG VĂN BẢN THUẦN TÚY, mỗi task trên 
                    <div style={{ marginTop: 16 }}>
                      <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 8 }}>
                        Đã đọc <strong>{excelData.length}</strong> dòng từ file.
+                     </div>
+                     <div className="form-group" style={{ marginBottom: 16 }}>
+                       <label>Role được gán Assignee</label>
+                       <select
+                         value={importAssigneeRole}
+                         onChange={(e) => setImportAssigneeRole(e.target.value as ImportAssigneeRole)}
+                         disabled={isRunning}
+                       >
+                         <option value="">-- Không gán role nào --</option>
+                         <option value="BA">BA</option>
+                         <option value="Tester">Tester</option>
+                         <option value="DEV">DEV</option>
+                       </select>
+                       <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)" }}>
+                         Chỉ task có tiền tố role được chọn mới nhận Assignee từ file; các role còn lại sẽ để Unassigned.
+                       </div>
                      </div>
                      <div className="bulk-excel-preview">
                        <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>

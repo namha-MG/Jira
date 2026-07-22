@@ -140,6 +140,7 @@ export default function Teams() {
   const [taskDateTo, setTaskDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [useDateFilter, setUseDateFilter] = useState(true);
   const [teamTasks, setTeamTasks] = useState<JiraIssue[]>([]);
+  const [taskPage, setTaskPage] = useState(1);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [tasksError, setTasksError] = useState("");
   // -- Type filter & Selection for tasks
@@ -150,6 +151,13 @@ export default function Teams() {
   const [assignSprintLoading, setAssignSprintLoading] = useState(false);
   const [availableSprints, setAvailableSprints] = useState<JiraSprint[]>([]);
   const [selectedSprintId, setSelectedSprintId] = useState<number | "">("");
+
+  const taskPageSize = 50;
+  const taskPageCount = Math.max(1, Math.ceil(teamTasks.length / taskPageSize));
+  const paginatedTeamTasks = useMemo(
+    () => teamTasks.slice((taskPage - 1) * taskPageSize, taskPage * taskPageSize),
+    [teamTasks, taskPage]
+  );
 
   // Modals for Delete Worklog & Assignee
   const [deleteWorklogModalOpen, setDeleteWorklogModalOpen] = useState(false);
@@ -676,6 +684,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
     setTasksLoading(true);
     setTasksError("");
     setSelectedTasks([]);
+    setTaskPage(1);
     setTeamTasks([]);
     try {
       const issues = await getAllIssuesByJql(jql, 500);
@@ -1757,10 +1766,14 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                         <th style={{ padding: "8px 12px", width: 40 }}>
                           <input
                             type="checkbox"
-                            checked={teamTasks.length > 0 && selectedTasks.length === teamTasks.length}
+                            checked={paginatedTeamTasks.length > 0 && paginatedTeamTasks.every(t => selectedTasks.includes(t.key))}
                             onChange={(e) => {
-                              if (e.target.checked) setSelectedTasks(teamTasks.map(t => t.key));
-                              else setSelectedTasks([]);
+                              const pageKeys = paginatedTeamTasks.map(t => t.key);
+                              if (e.target.checked) {
+                                setSelectedTasks(Array.from(new Set([...selectedTasks, ...pageKeys])));
+                              } else {
+                                setSelectedTasks(selectedTasks.filter(key => !pageKeys.includes(key)));
+                              }
                             }}
                           />
                         </th>
@@ -1773,7 +1786,7 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                       </tr>
                     </thead>
                     <tbody>
-                      {teamTasks.map(issue => {
+                      {paginatedTeamTasks.map(issue => {
                         const isClosed = ["closed", "done"].includes(issue.fields.status.name.toLowerCase());
                         const isSelected = selectedTasks.includes(issue.key);
                         return (
@@ -1826,6 +1839,32 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                       })}
                     </tbody>
                   </table>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 14 }}>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Hiển thị {(taskPage - 1) * taskPageSize + 1}–{Math.min(taskPage * taskPageSize, teamTasks.length)} / {teamTasks.length} issues
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setTaskPage(page => Math.max(1, page - 1))}
+                      disabled={taskPage === 1}
+                    >
+                      ← Trước
+                    </button>
+                    <span style={{ minWidth: 90, textAlign: "center", fontSize: 12, color: "var(--text-secondary)" }}>
+                      Trang {taskPage} / {taskPageCount}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setTaskPage(page => Math.min(taskPageCount, page + 1))}
+                      disabled={taskPage === taskPageCount}
+                    >
+                      Sau →
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
