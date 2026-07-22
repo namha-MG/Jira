@@ -536,6 +536,34 @@ export async function getProjectCreateMeta(projectKey: string, issueTypeName: st
 }
 
 /** Tạo mới Issue trên Jira với option Estimate và Assignee */
+function isTimeTrackingFieldUnavailable(error: unknown): boolean {
+  if (!axios.isAxiosError(error)) return false;
+
+  const data = error.response?.data as {
+    errors?: Record<string, unknown>;
+  } | undefined;
+
+  return Boolean(data?.errors && Object.prototype.hasOwnProperty.call(data.errors, "timetracking"));
+}
+
+async function createIssueWithOptionalTimeTracking(fields: Record<string, any>): Promise<JiraIssue> {
+  try {
+    const res = await jiraApi.post("/issue", { fields });
+    return res.data;
+  } catch (error) {
+    if (!fields.timetracking || !isTimeTrackingFieldUnavailable(error)) {
+      throw error;
+    }
+
+    // Jira rejects the whole create request when Time Tracking is not on the
+    // Create screen. Retry once without it so imports can still create issues.
+    const { timetracking: _ignored, ...fieldsWithoutTimeTracking } = fields;
+    console.warn("Time Tracking is unavailable on the Jira Create screen; retrying without estimate.");
+    const res = await jiraApi.post("/issue", { fields: fieldsWithoutTimeTracking });
+    return res.data;
+  }
+}
+
 export async function createIssue(options: {
   projectKey: string;
   summary: string;
@@ -556,7 +584,10 @@ export async function createIssue(options: {
     Object.assign(fields, options.customFields);
   }
 
-  if (options.originalEstimate) {
+  const issueTypeName = options.issueTypeName || "Task";
+  const supportsTimeTracking = issueTypeName.trim().toLowerCase() !== "story";
+
+  if (options.originalEstimate && supportsTimeTracking) {
     fields.timetracking = {
       originalEstimate: options.originalEstimate,
     };
@@ -578,8 +609,7 @@ export async function createIssue(options: {
     }
   }
 
-  const res = await jiraApi.post("/issue", { fields });
-  return res.data;
+  return createIssueWithOptionalTimeTracking(fields);
 }
 
 /** Tạo Sub-task cho một Issue cha */
@@ -632,8 +662,7 @@ export async function createSubTask(options: {
     }
   }
 
-  const res = await jiraApi.post("/issue", { fields });
-  return res.data;
+  return createIssueWithOptionalTimeTracking(fields);
 }
 
 /** Format seconds sang string hiển thị */
