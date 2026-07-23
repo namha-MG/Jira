@@ -33,8 +33,11 @@ export default function JobLogs() {
       const res = await fetch("/api/jobs");
       const data = await res.json();
       setJobs(data);
-      if (data.length > 0 && selectedJob === null) {
-        setSelectedJob(data[0].id);
+      if (data.length > 0) {
+        // Use the latest state value. The polling callback is created on mount,
+        // so reading selectedJob directly here would always see null and reset
+        // the selection to the first job every three seconds.
+        setSelectedJob(current => current ?? data[0].id);
       }
     } catch (err) {
       console.error("Failed to fetch jobs:", err);
@@ -103,6 +106,7 @@ export default function JobLogs() {
 
   const getStatusBadge = (status: string) => {
     if (status === "SUCCESS") return <span className="badge badge-done" style={{ padding: "2px 6px", fontSize: 10 }}>SUCCESS</span>;
+    if (status === "PARTIAL_SUCCESS") return <span className="badge badge-inprogress" style={{ padding: "2px 6px", fontSize: 10 }}>PARTIAL</span>;
     if (status === "FAILED") return <span className="badge badge-blocked" style={{ padding: "2px 6px", fontSize: 10 }}>FAILED</span>;
     if (status === "RUNNING") return <span className="badge badge-inprogress" style={{ padding: "2px 6px", fontSize: 10 }}>RUNNING</span>;
     return <span className="badge badge-todo" style={{ padding: "2px 6px", fontSize: 10 }}>{status}</span>;

@@ -48,7 +48,7 @@ function parseListConfig(value: string | undefined) {
     .filter(Boolean);
 }
 
-async function processUser(pat: string, client: Client, runType: string = "CRON", geminiKey?: string) {
+async function processUserLegacy(pat: string, client: Client, runType: string = "CRON", geminiKey?: string) {
   let runId: number | null = null;
   
   try {
@@ -224,6 +224,299 @@ async function processUser(pat: string, client: Client, runType: string = "CRON"
       await client.query(
         `UPDATE job_runs SET status = 'FAILED', completed_at = CURRENT_TIMESTAMP, error_message = $1 WHERE id = $2`,
         [errorMsg, runId]
+      );
+    }
+  }
+}
+
+function jiraDatePart(value: string | undefined | null) {
+  return String(value || "").match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || null;
+}
+
+function jobErrorMessage(error: any) {
+  const detail = error?.response?.data || error?.message || error;
+  return typeof detail === "string" ? detail : JSON.stringify(detail);
+}
+
+async function writeAutoJobLog(
+  client: Client,
+  runId: number | null,
+  issueKey: string,
+  actionType: string,
+  status: string,
+  message: string,
+) {
+  if (runId === null) {
+    throw new Error("Cannot write auto-job detail before the job run is created.");
+  }
+  await client.query(
+    `INSERT INTO job_task_logs (job_run_id, issue_key, action_type, status, message)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [runId, issueKey, actionType, status, message],
+  );
+}
+
+async function generateWorklogComment(summary: string, geminiKey?: string) {
+  const fallback = "Hoàn thành công việc theo yêu cầu";
+  if (!geminiKey) return fallback;
+
+  try {
+    const prompt = `Viết một câu tiếng Việt tự nhiên dưới 15 từ để log work cho task: "${summary}". Chỉ trả về nội dung câu.`;
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      },
+    );
+    if (!response.ok) return fallback;
+    const data = await response.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || fallback;
+  } catch (error) {
+    console.warn("AI generation failed for auto log work, using fallback", error);
+    return fallback;
+  }
+}
+
+async function processUser(pat: string, client: Client, runType: string = "CRON", geminiKey?: string) {
+  let runId: number | null = null;
+
+  try {
+    const runRes = await client.query(
+      `INSERT INTO job_runs (run_type, status) VALUES ($1, 'RUNNING') RETURNING id`,
+      [runType],
+    );
+    runId = runRes.rows[0].id;
+
+    const api = getJiraApi(pat);
+    const result = await getMyIssues(api, []);
+    const issues = result.issues;
+    const today = todayInBangkok();
+    const processedTasks = new Set<string>();
+    let logWorkCount = 0;
+    let inProgressCount = 0;
+    let closedCount = 0;
+    let failureCount = 0;
+
+    await writeAutoJobLog(
+      client,
+      runId,
+      "__JOB__",
+      "JOB_SCAN",
+      "SUCCESS",
+      `Loaded ${issues.length}/${result.total} assigned Jira issues. Evaluation date: ${today} (Asia/Bangkok).`,
+    );
+
+    for (const issue of issues) {
+      const status = issue.fields.status?.name || "Unknown";
+      const statusName = status.toLowerCase();
+      const isDone =
+        statusName.includes("close") ||
+        statusName.includes("resolve") ||
+        statusName.includes("cancel") ||
+        statusName.includes("done") ||
+        statusName.includes("đóng") ||
+        statusName.includes("hoàn thành") ||
+        statusName.includes("đã giải quyết");
+
+      if (isDone) {
+        await writeAutoJobLog(client, runId, issue.key, "AUTO_CHECK", "SKIPPED", `Status is already "${status}".`);
+        continue;
+      }
+
+      if (!issue.fields.assignee) {
+        await writeAutoJobLog(client, runId, issue.key, "AUTO_CHECK", "SKIPPED", "Issue has no assignee.");
+        continue;
+      }
+
+      const startDate = jiraDatePart(issue.fields.customfield_10300);
+      // The UI treats customfield_10302 as End Date, so it must take precedence.
+      const endDate = jiraDatePart(issue.fields.customfield_10302 || issue.fields.duedate);
+      const isToDo = ["open", "to do", "mở", "cần làm"].includes(statusName);
+
+      if (endDate && endDate <= today) {
+        const estimate = issue.fields.timetracking?.originalEstimateSeconds || 0;
+        const logged = issue.fields.timetracking?.timeSpentSeconds || 0;
+        const secondsToLog = estimate > 0
+          ? Math.max(0, estimate - logged)
+          : (logged === 0 ? 8 * 3600 : 0);
+
+        await writeAutoJobLog(
+          client,
+          runId,
+          issue.key,
+          "AUTO_CHECK",
+          "SUCCESS",
+          `Due: End Date ${endDate}; estimate ${estimate}s; logged ${logged}s; status "${status}".`,
+        );
+
+        let worklogSucceeded = true;
+        const comment = await generateWorklogComment(issue.fields.summary, geminiKey);
+
+        if (secondsToLog > 0) {
+          try {
+            await addWorklog(api, issue.key, secondsToLog, comment);
+            logWorkCount++;
+            processedTasks.add(issue.key);
+            await writeAutoJobLog(
+              client,
+              runId,
+              issue.key,
+              "LOG_WORK",
+              "SUCCESS",
+              `Logged ${secondsToLog}s (estimate ${estimate}s, previously logged ${logged}s): ${comment}`,
+            );
+          } catch (error) {
+            worklogSucceeded = false;
+            failureCount++;
+            await writeAutoJobLog(client, runId, issue.key, "LOG_WORK", "FAILED", jobErrorMessage(error));
+          }
+        } else {
+          await writeAutoJobLog(
+            client,
+            runId,
+            issue.key,
+            "LOG_WORK",
+            "SKIPPED",
+            estimate > 0
+              ? `Already logged ${logged}s of ${estimate}s estimate.`
+              : "No estimate is configured and the issue already has logged time.",
+          );
+        }
+
+        if (!worklogSucceeded) {
+          await writeAutoJobLog(
+            client,
+            runId,
+            issue.key,
+            "TRANSITION_CLOSED",
+            "SKIPPED",
+            "Close skipped because automatic worklog failed.",
+          );
+          continue;
+        }
+
+        try {
+          const transitions = await getTransitions(api, issue.key);
+          const closeKeywords = ["closed", "close", "đóng", "resolved", "resolve", "done", "đã giải quyết", "hoàn thành"];
+          const closeTransition = transitions.find((transition: any) => {
+            const transitionName = String(transition.name || "").toLowerCase();
+            const destinationName = String(transition.to?.name || "").toLowerCase();
+            return closeKeywords.some(keyword =>
+              transitionName.includes(keyword) || destinationName.includes(keyword),
+            );
+          });
+
+          if (!closeTransition) {
+            failureCount++;
+            await writeAutoJobLog(
+              client,
+              runId,
+              issue.key,
+              "TRANSITION_CLOSED",
+              "FAILED",
+              `No Close/Resolve transition is available from status "${status}".`,
+            );
+            continue;
+          }
+
+          await transitionIssue(api, issue.key, closeTransition.id, {
+            customfield_10304: comment,
+            resolution: { id: "10000" },
+          });
+          closedCount++;
+          processedTasks.add(issue.key);
+          await writeAutoJobLog(
+            client,
+            runId,
+            issue.key,
+            "TRANSITION_CLOSED",
+            "SUCCESS",
+            `Transitioned to ${closeTransition.name}.`,
+          );
+        } catch (error) {
+          failureCount++;
+          await writeAutoJobLog(client, runId, issue.key, "TRANSITION_CLOSED", "FAILED", jobErrorMessage(error));
+        }
+      } else if (startDate && startDate <= today && isToDo) {
+        await writeAutoJobLog(
+          client,
+          runId,
+          issue.key,
+          "AUTO_CHECK",
+          "SUCCESS",
+          `Start Date ${startDate} reached; attempting In Progress transition.`,
+        );
+
+        try {
+          const transitions = await getTransitions(api, issue.key);
+          const inProgressKeywords = ["in progress", "đang thực hiện", "đang làm"];
+          const transition = transitions.find((item: any) => {
+            const transitionName = String(item.name || "").toLowerCase();
+            const destinationName = String(item.to?.name || "").toLowerCase();
+            return inProgressKeywords.some(keyword =>
+              transitionName.includes(keyword) || destinationName.includes(keyword),
+            );
+          });
+
+          if (!transition) {
+            failureCount++;
+            await writeAutoJobLog(
+              client,
+              runId,
+              issue.key,
+              "TRANSITION_IN_PROGRESS",
+              "FAILED",
+              `No In Progress transition is available from status "${status}".`,
+            );
+            continue;
+          }
+
+          await transitionIssue(api, issue.key, transition.id);
+          inProgressCount++;
+          processedTasks.add(issue.key);
+          await writeAutoJobLog(
+            client,
+            runId,
+            issue.key,
+            "TRANSITION_IN_PROGRESS",
+            "SUCCESS",
+            `Transitioned to ${transition.name}.`,
+          );
+        } catch (error) {
+          failureCount++;
+          await writeAutoJobLog(client, runId, issue.key, "TRANSITION_IN_PROGRESS", "FAILED", jobErrorMessage(error));
+        }
+      } else {
+        const reason = !startDate && !endDate
+          ? "No Start Date or End Date is configured."
+          : `Not due. Start Date: ${startDate || "none"}; End Date: ${endDate || "none"}; status: "${status}".`;
+        await writeAutoJobLog(client, runId, issue.key, "AUTO_CHECK", "SKIPPED", reason);
+      }
+    }
+
+    const finalStatus = failureCount > 0 ? "PARTIAL_SUCCESS" : "SUCCESS";
+    const summary = `Scanned ${issues.length}; worklogged ${logWorkCount}; moved to In Progress ${inProgressCount}; closed ${closedCount}; failures ${failureCount}.`;
+    await writeAutoJobLog(client, runId, "__JOB__", "JOB_SUMMARY", finalStatus, summary);
+    await client.query(
+      `UPDATE job_runs
+       SET status = $1, completed_at = CURRENT_TIMESTAMP, tasks_processed = $2, error_message = $3
+       WHERE id = $4`,
+      [
+        finalStatus,
+        processedTasks.size,
+        failureCount > 0 ? `${failureCount} action(s) failed. See task logs for details.` : null,
+        runId,
+      ],
+    );
+  } catch (error) {
+    const message = jobErrorMessage(error);
+    console.error("Auto process user failed", message);
+    if (runId) {
+      await client.query(
+        `UPDATE job_runs SET status = 'FAILED', completed_at = CURRENT_TIMESTAMP, error_message = $1 WHERE id = $2`,
+        [message, runId],
       );
     }
   }

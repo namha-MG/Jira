@@ -2371,8 +2371,28 @@ Trả về JSON array THUẦN TÚY, không có markdown, không có text thêm:
                   if (!selectedSprintId) return;
                   setAssignSprintLoading(true);
                   try {
-                    await moveIssuesToSprint(selectedSprintId as number, selectedTasks);
-                    alert("Gắn task vào sprint thành công!");
+                    const sprintTargetKeys = await moveIssuesToSprint(selectedSprintId as number, selectedTasks);
+                    try {
+                      const sprintData = await getIssuesInSprint(selectedSprintId as number);
+                      const sprintIssueKeys = new Set(sprintData.issues.map(issue => issue.key));
+                      const missingIssues = sprintTargetKeys.filter(key => !sprintIssueKeys.has(key));
+
+                      if (expandedSprintId === selectedSprintId) {
+                        setSprintTasks(sprintData.issues);
+                      }
+
+                      if (missingIssues.length > 0) {
+                        alert(`Jira đã nhận yêu cầu nhưng chưa thấy ${missingIssues.length}/${sprintTargetKeys.length} issue cha trong Sprint: ${missingIssues.join(", ")}`);
+                      } else {
+                        const parentNote = sprintTargetKeys.length < selectedTasks.length
+                          ? ` (${selectedTasks.length - sprintTargetKeys.length} Sub-task được đưa vào Sprint thông qua issue cha)`
+                          : "";
+                        alert(`Đã gán và kiểm tra thành công ${sprintTargetKeys.length} issue vào Sprint${parentNote}.`);
+                      }
+                    } catch (verifyError) {
+                      console.warn("Assigned issues to sprint but could not verify the result", verifyError);
+                      alert("Jira đã nhận yêu cầu gán Sprint, nhưng hệ thống chưa thể tải lại dữ liệu để kiểm tra.");
+                    }
                     setAssignSprintModalOpen(false);
                     setSelectedTasks([]);
                   } catch (err: any) {

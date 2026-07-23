@@ -21,14 +21,34 @@ export async function getMyIssues(api: any, projectKeys?: string[]) {
     jql = `project in (${projectFilter}) AND assignee = currentUser() ORDER BY updated DESC`;
   }
 
-  const res = await api.get("/search", {
-    params: {
-      jql,
-      maxResults: 100,
-      fields: "summary,status,priority,assignee,timetracking,worklog,created,updated,duedate,project,issuetype,customfield_10300,customfield_10302",
-    },
-  });
-  return res.data;
+  const maxResults = 100;
+  const issues: any[] = [];
+  let startAt = 0;
+  let total = 0;
+
+  do {
+    const res = await api.get("/search", {
+      params: {
+        jql,
+        startAt,
+        maxResults,
+        fields: "summary,status,priority,assignee,timetracking,worklog,created,updated,duedate,project,issuetype,customfield_10300,customfield_10302",
+      },
+    });
+    const pageIssues = res.data.issues || [];
+    total = res.data.total || pageIssues.length;
+    issues.push(...pageIssues);
+    startAt += pageIssues.length;
+
+    if (pageIssues.length === 0) break;
+  } while (startAt < total);
+
+  return {
+    issues,
+    total,
+    startAt: 0,
+    maxResults: issues.length,
+  };
 }
 
 export async function getTransitions(api: any, issueKey: string) {

@@ -961,10 +961,24 @@ export async function getSprints(boardId: number, state?: string): Promise<JiraS
 
 export async function getIssuesInSprint(sprintId: number, startAt: number = 0, maxResults: number = 100): Promise<{ issues: JiraIssue[]; total: number }> {
   const fields = "summary,status,priority,assignee,timetracking,aggregatetimespent,aggregatetimeoriginalestimate,aggregateprogress,worklog,created,updated,resolutiondate,duedate,project,issuetype,customfield_10300,customfield_10302,parent,attachment,labels,*navigable";
-  const res = await jiraAgileApi.get(`/sprint/${sprintId}/issue`, {
-    params: { startAt, maxResults, fields }
-  });
-  return { issues: res.data.issues || [], total: res.data.total || 0 };
+  const issues: JiraIssue[] = [];
+  const pageSize = Math.min(maxResults, 100);
+  let nextStartAt = startAt;
+  let total = 0;
+
+  do {
+    const res = await jiraAgileApi.get(`/sprint/${sprintId}/issue`, {
+      params: { startAt: nextStartAt, maxResults: pageSize, fields }
+    });
+    const pageIssues: JiraIssue[] = res.data.issues || [];
+    total = res.data.total || 0;
+    issues.push(...pageIssues);
+    nextStartAt += pageIssues.length;
+
+    if (pageIssues.length === 0) break;
+  } while (nextStartAt < total);
+
+  return { issues, total };
 }
 
 export async function createSprint(payload: { name: string; startDate?: string; endDate?: string; goal?: string; originBoardId: number }): Promise<JiraSprint> {
@@ -982,7 +996,40 @@ export async function startSprint(sprintId: number, payload: { name: string; sta
   return res.data;
 }
 
-export async function moveIssuesToSprint(sprintId: number, issues: string[]): Promise<any> {
-  const res = await jiraAgileApi.post(`/sprint/${sprintId}/issue`, { issues });
-  return res.data;
+export async function moveIssuesToSprint(sprintId: number, issues: string[]): Promise<string[]> {
+  const requestedIssues = Array.from(new Set(issues));
+  const batchSize = 50;
+  const sprintTargetKeys: string[] = [];
+
+  // Jira silently ignores Sub-tasks when calling the Agile move endpoint and
+  // still returns 204. A Sub-task belongs to a sprint through its parent, so
+  // resolve every selected Sub-task to the parent issue first.
+  for (let index = 0; index < requestedIssues.length; index += batchSize) {
+    const batch = requestedIssues.slice(index, index + batchSize);
+    const jql = `key in (${batch.map(key => `"${key}"`).join(", ")})`;
+    const res = await jiraApi.get("/search", {
+      params: {
+        jql,
+        startAt: 0,
+        maxResults: batch.length,
+        fields: "issuetype,parent",
+      },
+    });
+
+    const foundIssues: JiraIssue[] = res.data.issues || [];
+    for (const issue of foundIssues) {
+      const isSubTask = Boolean((issue.fields.issuetype as any)?.subtask);
+      const targetKey = isSubTask ? issue.fields.parent?.key : issue.key;
+      if (targetKey) sprintTargetKeys.push(targetKey);
+    }
+  }
+
+  const uniqueIssues = Array.from(new Set(sprintTargetKeys));
+
+  for (let index = 0; index < uniqueIssues.length; index += batchSize) {
+    const batch = uniqueIssues.slice(index, index + batchSize);
+    await jiraAgileApi.post(`/sprint/${sprintId}/issue`, { issues: batch });
+  }
+
+  return uniqueIssues;
 }
