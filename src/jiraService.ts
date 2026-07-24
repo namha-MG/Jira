@@ -953,10 +953,22 @@ export async function getBoards(projectKeyOrId?: string): Promise<any[]> {
 }
 
 export async function getSprints(boardId: number, state?: string): Promise<JiraSprint[]> {
-  const params: any = {};
-  if (state) params.state = state;
-  const res = await jiraAgileApi.get(`/board/${boardId}/sprint`, { params });
-  return res.data.values || [];
+  const sprints: JiraSprint[] = [];
+  const maxResults = 50;
+  let startAt = 0;
+
+  while (true) {
+    const params: any = { startAt, maxResults };
+    if (state) params.state = state;
+    const res = await jiraAgileApi.get(`/board/${boardId}/sprint`, { params });
+    const values: JiraSprint[] = res.data.values || [];
+    sprints.push(...values);
+
+    if (res.data.isLast === true || values.length === 0 || values.length < maxResults) break;
+    startAt += values.length;
+  }
+
+  return sprints;
 }
 
 export async function getIssuesInSprint(sprintId: number, startAt: number = 0, maxResults: number = 100): Promise<{ issues: JiraIssue[]; total: number }> {

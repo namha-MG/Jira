@@ -1897,6 +1897,16 @@ textarea { resize: vertical; min-height: 80px; }
     flex-direction: column;
   }
 
+  .issues-log-date-range {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .issues-log-date-range input[type="date"] {
+    flex: 1;
+    min-width: 120px;
+  }
+
   .issues-table {
     min-width: 0 !important;
     border-collapse: separate;

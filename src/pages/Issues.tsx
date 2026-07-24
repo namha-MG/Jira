@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, updateIssueEstimate, updateIssue, getCurrentUser, deleteIssue
+  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, JiraSprint, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, updateIssueEstimate, updateIssue, getCurrentUser, deleteIssue, getBoards, getSprints
 } from "../jiraService";
 import { getDefaultProjectKey, getSelectedJiraProjects } from "../config";
 import NotificationBell from "../components/NotificationBell";
@@ -71,7 +71,12 @@ export default function Issues() {
   const [selectedIssue, setSelectedIssue] = useState<JiraIssue | null>(null);
   const [worklogs, setWorklogs] = useState<JiraWorklog[]>([]);
   const [worklogLoading, setWorklogLoading] = useState(false);
-  const [timeRange, setTimeRange] = useState<"month" | "all">("month");
+  const [timeRange, setTimeRange] = useState<"month" | "custom" | "all">("month");
+  const [logDateFrom, setLogDateFrom] = useState("");
+  const [logDateTo, setLogDateTo] = useState("");
+  const [availableSprints, setAvailableSprints] = useState<JiraSprint[]>([]);
+  const [selectedSprint, setSelectedSprint] = useState("");
+  const [loadingSprints, setLoadingSprints] = useState(false);
   const [sortBy, setSortBy] = useState<"key" | "updated" | "logged" | "estimate" | "startDate">("updated");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [advancedFilter, setAdvancedFilter] = useState("all");
@@ -137,6 +142,7 @@ export default function Issues() {
     setStatusFilter([]);
     setAssigneeFilter("all");
     setSelectedIssueKeys(new Set());
+    setSelectedSprint("");
     
     // Fetch all assignable users for the selected project
     if (isConfigured) {
@@ -152,6 +158,50 @@ export default function Issues() {
     }
   }, [selectedProject, isConfigured]);
 
+  useEffect(() => {
+    if (!isConfigured || !selectedProject) return;
+
+    let cancelled = false;
+    setLoadingSprints(true);
+    getBoards(selectedProject)
+      .then(async boards => {
+        const sprintGroups = await Promise.all(
+          boards.map(async board => {
+            try {
+              const sprints = await getSprints(board.id);
+              return sprints.map(sprint => ({
+                ...sprint,
+                name: boards.length > 1 ? `${sprint.name} (${board.name})` : sprint.name,
+              }));
+            } catch {
+              return [];
+            }
+          })
+        );
+        if (!cancelled) {
+          const uniqueSprints = Array.from(
+            new Map(sprintGroups.flat().map(sprint => [sprint.id, sprint])).values()
+          ).sort((a, b) => {
+            const stateOrder = { active: 0, future: 1, closed: 2 };
+            return stateOrder[a.state] - stateOrder[b.state] ||
+              (b.startDate || "").localeCompare(a.startDate || "");
+          });
+          setAvailableSprints(uniqueSprints);
+        }
+      })
+      .catch(error => {
+        console.warn("Không thể tải danh sách sprint", error);
+        if (!cancelled) setAvailableSprints([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSprints(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProject, isConfigured]);
+
   // Pagination states
   const [page, setPage] = useState(1);
   const pageSize = 50;
@@ -165,11 +215,19 @@ export default function Issues() {
       if (loadScope === "me") {
         baseJql += ` AND assignee = currentUser()`;
       }
+      if (selectedSprint) {
+        baseJql += ` AND sprint = ${Number(selectedSprint)}`;
+      }
       const monthClause = ` AND (updated >= startOfMonth() OR worklogDate >= startOfMonth() OR (cf[10300] >= startOfMonth() AND cf[10300] <= endOfMonth()))`;
+      const customLogClause = logDateFrom && logDateTo
+        ? ` AND worklogDate >= "${logDateFrom}" AND worklogDate <= "${logDateTo}"`
+        : "";
       const orderBy = ` ORDER BY updated DESC`;
       let jql = baseJql;
       if (timeRange === "month") {
         jql += monthClause;
+      } else if (timeRange === "custom") {
+        jql += customLogClause;
       }
       jql += orderBy;
 
@@ -182,7 +240,7 @@ export default function Issues() {
         result = await getAllIssuesByJql(`${baseJql}${orderBy}`);
       }
 
-      if (loadScope === "me") {
+      if (loadScope === "me" && !selectedSprint) {
         const parentKeys = new Set<string>();
         result.forEach(issue => {
           if (issue.fields.parent && issue.fields.parent.key) {
@@ -248,7 +306,7 @@ export default function Issues() {
     } finally {
       setLoading(false);
     }
-  }, [selectedProject, timeRange, loadScope, isConfigured]);
+  }, [selectedProject, timeRange, logDateFrom, logDateTo, selectedSprint, loadScope, isConfigured]);
 
   useEffect(() => { fetchIssues(); }, [fetchIssues]);
 
@@ -482,13 +540,32 @@ export default function Issues() {
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-  const loggedRange = timeRange === "month" ? { start: startOfMonth, end: endOfMonth } : undefined;
+  const customRange = logDateFrom && logDateTo
+    ? {
+        start: new Date(`${logDateFrom}T00:00:00`),
+        end: new Date(`${logDateTo}T23:59:59.999`),
+      }
+    : undefined;
+  const loggedRange = timeRange === "month"
+    ? { start: startOfMonth, end: endOfMonth }
+    : timeRange === "custom"
+      ? customRange
+      : undefined;
   const shouldUseCurrentUserWorklogs =
     loadScope === "me" ||
     userMatchesFilter(currentUser, assigneeFilter);
   const worklogUserForView = shouldUseCurrentUserWorklogs ? currentUser : null;
   const getLoggedForIssue = (issue: JiraIssue) => {
-    const worklogTotal = issue.fields.worklog?.worklogs?.reduce((sum, wl) => sum + (wl.timeSpentSeconds || 0), 0) || 0;
+    const worklogs = issue.fields.worklog?.worklogs || [];
+    if (loggedRange || worklogUserForView) {
+      return worklogs.reduce((sum, worklog) => {
+        if (!isWorklogByUser(worklog, worklogUserForView)) return sum;
+        if (!isDateInRange(new Date(worklog.started), loggedRange)) return sum;
+        return sum + (worklog.timeSpentSeconds || 0);
+      }, 0);
+    }
+
+    const worklogTotal = worklogs.reduce((sum, worklog) => sum + (worklog.timeSpentSeconds || 0), 0);
     return issue.fields.aggregatetimespent ?? issue.fields.timetracking?.timeSpentSeconds ?? worklogTotal;
   };
 
@@ -512,6 +589,11 @@ export default function Issues() {
           (wl) => isWorklogByUser(wl, worklogUserForView) && isDateInRange(new Date(wl.started), loggedRange)
         );
         matchTime = isDateInRange(updatedDate, loggedRange) || hasStartDateThisMonth || !!hasWorklogThisMonth;
+      } else if (timeRange === "custom" && loggedRange) {
+        matchTime = !!i.fields.worklog?.worklogs?.some(
+          worklog => isWorklogByUser(worklog, worklogUserForView) &&
+            isDateInRange(new Date(worklog.started), loggedRange)
+        );
       }
 
       const matchAssignee = assigneeFilter === "all" ||
@@ -701,6 +783,26 @@ export default function Issues() {
             ))}
           </div>
 
+          <select
+            className="filter-field"
+            value={selectedSprint}
+            onChange={event => {
+              setSelectedSprint(event.target.value);
+              setPage(1);
+            }}
+            disabled={loadingSprints}
+            style={{ width: 190 }}
+            aria-label="Lọc theo sprint"
+          >
+            <option value="">{loadingSprints ? "Đang tải sprint..." : "Tất cả sprint"}</option>
+            {availableSprints.map(sprint => (
+              <option key={sprint.id} value={String(sprint.id)}>
+                {sprint.state === "active" ? "● " : sprint.state === "future" ? "◷ " : "✓ "}
+                {sprint.name}
+              </option>
+            ))}
+          </select>
+
           {/* Load Scope Tabs */}
           <div className="segmented-control" style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.03)", padding: 3, borderRadius: 8, border: "1px solid var(--border)" }}>
             <button
@@ -759,6 +861,50 @@ export default function Issues() {
             >
               Tất cả
             </button>
+          </div>
+
+          <div
+            className="issues-log-date-range"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "3px 6px",
+              borderRadius: 8,
+              border: `1px solid ${timeRange === "custom" ? "var(--accent-blue)" : "var(--border)"}`,
+              background: "rgba(255,255,255,0.03)",
+            }}
+          >
+            <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>Log từ</span>
+            <input
+              type="date"
+              value={logDateFrom}
+              max={logDateTo || undefined}
+              onChange={event => {
+                const value = event.target.value;
+                setLogDateFrom(value);
+                if (value && (!logDateTo || value > logDateTo)) setLogDateTo(value);
+                setTimeRange(value ? "custom" : "all");
+                setPage(1);
+              }}
+              style={{ width: 125, padding: "4px 6px", fontSize: 11 }}
+              aria-label="Ngày bắt đầu log work"
+            />
+            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>đến</span>
+            <input
+              type="date"
+              value={logDateTo}
+              min={logDateFrom || undefined}
+              onChange={event => {
+                const value = event.target.value;
+                setLogDateTo(value);
+                if (value && (!logDateFrom || value < logDateFrom)) setLogDateFrom(value);
+                setTimeRange(value ? "custom" : "all");
+                setPage(1);
+              }}
+              style={{ width: 125, padding: "4px 6px", fontSize: 11 }}
+              aria-label="Ngày kết thúc log work"
+            />
           </div>
 
           <div className="issues-filter-controls" style={{ flex: 1, display: "flex", gap: 8, minWidth: 200, marginLeft: "auto" }}>
