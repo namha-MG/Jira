@@ -355,6 +355,30 @@ body {
   background: rgba(239, 68, 68, 0.2);
 }
 
+.issues-bulk-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  color: var(--text-primary);
+  background: rgba(79, 142, 247, 0.08);
+  border: 1px solid rgba(79, 142, 247, 0.25);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+.issues-select-cell {
+  width: 38px;
+  min-width: 38px;
+  text-align: center;
+}
+
+.issues-table tbody tr.is-selected {
+  background: rgba(79, 142, 247, 0.08);
+}
+
 .btn-ghost {
   background: transparent;
   color: var(--text-secondary);
@@ -1868,6 +1892,11 @@ textarea { resize: vertical; min-height: 80px; }
 }
 
 @media (max-width: 640px) {
+  .issues-bulk-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .issues-table {
     min-width: 0 !important;
     border-collapse: separate;

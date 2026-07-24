@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, updateIssueEstimate, updateIssue, getCurrentUser
+  getIssuesByProject, getAllIssuesByJql, getWorklogs, JiraIssue, JiraUser, JiraWorklog, formatSeconds, createSubTask, getIssue, addWorklog, getAssignableUsers, getTransitions, transitionIssue, getJiraFields, generateAiOutput, addComment, uploadAttachment, updateIssueEstimate, updateIssue, getCurrentUser, deleteIssue
 } from "../jiraService";
 import { getDefaultProjectKey, getSelectedJiraProjects } from "../config";
 import NotificationBell from "../components/NotificationBell";
@@ -76,6 +76,8 @@ export default function Issues() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [advancedFilter, setAdvancedFilter] = useState("all");
   const [loadScope, setLoadScope] = useState<"me" | "all">("me");
+  const [selectedIssueKeys, setSelectedIssueKeys] = useState<Set<string>>(new Set());
+  const [deletingIssues, setDeletingIssues] = useState(false);
 
   // Sub-task states
   const [subTaskModalOpen, setSubTaskModalOpen] = useState<JiraIssue | null>(null);
@@ -134,6 +136,7 @@ export default function Issues() {
   useEffect(() => {
     setStatusFilter([]);
     setAssigneeFilter("all");
+    setSelectedIssueKeys(new Set());
     
     // Fetch all assignable users for the selected project
     if (isConfigured) {
@@ -236,6 +239,8 @@ export default function Issues() {
       }
 
       setIssues(issuesWithFullWorklogs);
+      const refreshedKeys = new Set(issuesWithFullWorklogs.map(issue => issue.key));
+      setSelectedIssueKeys(prev => new Set(Array.from(prev).filter(key => refreshedKeys.has(key))));
       setPage(1); // Reset trang về 1 mỗi khi load lại
     } catch (err: unknown) {
       const e = err as { message?: string };
@@ -565,6 +570,77 @@ export default function Issues() {
   const totalFiltered = filtered.length;
   const totalPages = Math.ceil(totalFiltered / pageSize) || 1;
   const paginatedFiltered = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const currentPageKeys = paginatedFiltered.map(issue => issue.key);
+  const selectedOnCurrentPage = currentPageKeys.filter(key => selectedIssueKeys.has(key)).length;
+  const allCurrentPageSelected = currentPageKeys.length > 0 && selectedOnCurrentPage === currentPageKeys.length;
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const toggleIssueSelection = (issueKey: string, checked: boolean) => {
+    setSelectedIssueKeys(prev => {
+      const next = new Set(prev);
+      if (checked) next.add(issueKey);
+      else next.delete(issueKey);
+      return next;
+    });
+  };
+
+  const toggleCurrentPageSelection = (checked: boolean) => {
+    setSelectedIssueKeys(prev => {
+      const next = new Set(prev);
+      currentPageKeys.forEach(key => {
+        if (checked) next.add(key);
+        else next.delete(key);
+      });
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    const keys = Array.from(selectedIssueKeys);
+    if (keys.length === 0 || deletingIssues) return;
+
+    const confirmed = window.confirm(
+      `Bạn có chắc muốn xóa vĩnh viễn ${keys.length} task đã chọn?\n\n` +
+      `${keys.join(", ")}\n\nCác sub-task của task cha cũng sẽ bị xóa. Thao tác này không thể hoàn tác.`
+    );
+    if (!confirmed) return;
+
+    setDeletingIssues(true);
+    setError(null);
+    const jobId = jobStore.addJob({ type: "Xóa", title: `Xóa ${keys.length} task Jira` });
+    const deletedKeys: string[] = [];
+    const failedKeys: string[] = [];
+
+    try {
+      const batchSize = 5;
+      for (let index = 0; index < keys.length; index += batchSize) {
+        const batch = keys.slice(index, index + batchSize);
+        const results = await Promise.allSettled(batch.map(key => deleteIssue(key, true)));
+        results.forEach((result, resultIndex) => {
+          const key = batch[resultIndex];
+          if (result.status === "fulfilled") deletedKeys.push(key);
+          else failedKeys.push(key);
+        });
+      }
+
+      const deletedSet = new Set(deletedKeys);
+      setIssues(prev => prev.filter(issue => !deletedSet.has(issue.key)));
+      setSelectedIssueKeys(new Set(failedKeys));
+
+      if (failedKeys.length > 0) {
+        const message = `Đã xóa ${deletedKeys.length}/${keys.length} task. Không thể xóa: ${failedKeys.join(", ")}.`;
+        setError(message);
+        jobStore.updateJobStatus(jobId, "error", message);
+      } else {
+        jobStore.updateJobStatus(jobId, "success");
+      }
+    } finally {
+      setDeletingIssues(false);
+    }
+  };
 
   const uniqueStatuses = [...new Set(issues.map((i) => i.fields.status.name))];
   const uniqueTypes = [...new Set(issues.map((i) => i.fields.issuetype?.name).filter(Boolean))];
@@ -882,19 +958,56 @@ export default function Issues() {
           <div className="toast error" style={{ marginBottom: 12 }}>❌ {error}</div>
         )}
 
+        {selectedIssueKeys.size > 0 && (
+          <div className="issues-bulk-actions">
+            <span>Đã chọn <strong>{selectedIssueKeys.size}</strong> task</span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setSelectedIssueKeys(new Set())}
+                disabled={deletingIssues}
+              >
+                Bỏ chọn
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger btn-sm"
+                onClick={handleBulkDelete}
+                disabled={deletingIssues}
+              >
+                {deletingIssues ? "Đang xóa..." : `Xóa ${selectedIssueKeys.size} task`}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Table */}
         {(() => {
           const totalFilteredLoggedSeconds = filtered.reduce((sum, issue) => {
             return sum + getLoggedForIssue(issue);
           }, 0);
           const totalFilteredLoggedHours = (totalFilteredLoggedSeconds / 3600).toFixed(1);
-          const issueTableLabels = ["Key", "Tóm tắt", "Người xử lý", "Trạng thái", "Loại", "Start - End", "Estimate", "Logged", "Tiến độ", "Cập nhật", "Hành động"];
+          const issueTableLabels = ["Chọn", "Key", "Tóm tắt", "Người xử lý", "Trạng thái", "Loại", "Start - End", "Estimate", "Logged", "Tiến độ", "Cập nhật", "Hành động"];
 
           return (
             <div className="table-wrap">
               <table className="issues-table">
                 <thead>
                   <tr>
+                    <th className="issues-select-cell">
+                      <input
+                        type="checkbox"
+                        aria-label="Chọn tất cả task trên trang"
+                        title="Chọn tất cả task trên trang"
+                        checked={allCurrentPageSelected}
+                        ref={(input) => {
+                          if (input) input.indeterminate = selectedOnCurrentPage > 0 && !allCurrentPageSelected;
+                        }}
+                        onChange={(event) => toggleCurrentPageSelection(event.target.checked)}
+                        disabled={loading || currentPageKeys.length === 0 || deletingIssues}
+                      />
+                    </th>
                     <th onClick={() => handleSort("key")} style={{ cursor: "pointer" }}>Key{sortIndicator("key")}</th>
                     <th>Tóm tắt</th>
                     <th>Người xử lý</th>
@@ -912,14 +1025,14 @@ export default function Issues() {
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={i}>
-                    {Array.from({ length: 11 }).map((__, j) => (
+                    {Array.from({ length: 12 }).map((__, j) => (
                       <td key={j} data-label={issueTableLabels[j]}><div className="skeleton" style={{ height: 16, borderRadius: 4 }} /></td>
                     ))}
                   </tr>
                 ))
               ) : paginatedFiltered.length === 0 ? (
                 <tr>
-                  <td colSpan={11}>
+                  <td colSpan={12}>
                     <div className="empty-state" style={{ padding: 32 }}>
                       <div className="empty-state-icon">📭</div>
                       <div className="empty-state-title">Không có issues</div>
@@ -960,7 +1073,16 @@ export default function Issues() {
                   const endDateStr = formatDateForDisplay(issue.fields.customfield_10302 || issue.fields.duedate);
 
                   return (
-                    <tr key={issue.id}>
+                    <tr key={issue.id} className={selectedIssueKeys.has(issue.key) ? "is-selected" : undefined}>
+                      <td data-label="Chọn" className="issues-select-cell">
+                        <input
+                          type="checkbox"
+                          aria-label={`Chọn task ${issue.key}`}
+                          checked={selectedIssueKeys.has(issue.key)}
+                          onChange={(event) => toggleIssueSelection(issue.key, event.target.checked)}
+                          disabled={deletingIssues}
+                        />
+                      </td>
                       <td data-label="Key">
                         <a
                           href={`https://20.84.97.109:3033/browse/${issue.key}`}
