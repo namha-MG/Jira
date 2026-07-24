@@ -321,8 +321,8 @@ export default function BulkCreate() {
            const geminiKey = localStorage.getItem("gemini_api_key");
            if (geminiKey) {
              const prompt = (parsedStart && parsedEnd) 
-               ? `Bạn là một lập trình viên. Hãy phân tích Story có tiêu đề "${summary}" thành các sub-task nhỏ cho lập trình viên (Dev). Trả về danh sách thuần túy, mỗi dòng 1 task, không markdown.`
-               : `Bạn là một lập trình viên. Hãy phân tích Story có tiêu đề "${summary}" thành các sub-task nhỏ cho lập trình viên Junior (Dev) kèm theo estimate bằng giờ (h). Trả về danh sách thuần túy, mỗi dòng định dạng: Tên sub-task | Xh (ví dụ: Viết API | 4h). Không markdown.`;
+               ? `Bạn là một lập trình viên. Hãy phân tích Story có tiêu đề "${summary}" thành tối đa 3 sub-task quan trọng nhất cho lập trình viên (Dev). Gộp các đầu việc nhỏ có liên quan, không tách quá chi tiết. Trả về danh sách thuần túy, mỗi dòng 1 task, không markdown.`
+               : `Bạn là một lập trình viên. Hãy phân tích Story có tiêu đề "${summary}" thành tối đa 3 sub-task quan trọng nhất cho lập trình viên Junior (Dev) kèm theo estimate bằng giờ (h). Gộp các đầu việc nhỏ có liên quan, không tách quá chi tiết. Trả về danh sách thuần túy, mỗi dòng định dạng: Tên sub-task | Xh (ví dụ: Viết API | 4h). Không markdown.`;
              
              try {
                  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
@@ -334,7 +334,8 @@ export default function BulkCreate() {
                    const data = await response.json();
                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
                    if (text) {
-                     const lines = text.split("\n").filter((l: string) => l.trim().length > 3);
+                     // The prompt guides the model, while slice enforces the limit if it returns extra lines.
+                     const lines = text.split("\n").filter((l: string) => l.trim().length > 3).slice(0, 3);
                      if (parsedStart && parsedEnd) {
                        devTasks = lines.map((l: string) => ({ title: `[Dev] ${l.replace(/^[-*]\s*/, '').trim()}`, est: "2h" }));
                      } else {
